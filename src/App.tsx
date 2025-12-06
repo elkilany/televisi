@@ -3,11 +3,13 @@ import type { Channel, ChannelGroup, PlaylistInfo, ContentType } from './types';
 import type { XtreamCredentials, XtreamFullPlaylist } from './utils/xtreamApi';
 import { loadPlaylistFromUrl, loadPlaylistFromFile } from './utils/m3uParser';
 import { loadFullPlaylistFromXtream, loadSeriesEpisodes, saveXtreamCredentials, clearXtreamCredentials, loadXtreamCredentials } from './utils/xtreamApi';
+import { useDownloadManager } from './hooks/useDownloadManager';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelList } from './components/ChannelList';
 import { SearchBar } from './components/SearchBar';
 import { PlaylistLoader } from './components/PlaylistLoader';
 import { ContentTypeSelector } from './components/ContentTypeSelector';
+import { DownloadManager } from './components/DownloadManager';
 import './App.css';
 
 const FAVORITES_KEY = 'televisi-favorites';
@@ -28,6 +30,26 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showDownloadManager, setShowDownloadManager] = useState(false);
+
+  // Download manager
+  const {
+    downloads,
+    addDownload,
+    pauseDownload,
+    resumeDownload,
+    cancelDownload,
+    removeDownload,
+    retryDownload,
+    saveDownload,
+    clearCompleted,
+    clearAll,
+  } = useDownloadManager();
+
+  // Count active downloads
+  const activeDownloadsCount = downloads.filter(d =>
+    ['pending', 'downloading', 'paused'].includes(d.status)
+  ).length;
 
   // Get current playlist based on content type and source
   const currentPlaylist = useMemo((): PlaylistInfo => {
@@ -222,6 +244,11 @@ function App() {
     clearXtreamCredentials();
   }, []);
 
+  const handleDownload = useCallback((name: string, url: string) => {
+    addDownload(name, url);
+    setShowDownloadManager(true);
+  }, [addDownload]);
+
   // Show playlist loader if no content loaded
   if (!hasContent) {
     return (
@@ -245,19 +272,33 @@ function App() {
             </svg>
             <span>Televisi</span>
           </div>
-          <button
-            className="app__sidebar-toggle"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              {sidebarCollapsed ? (
-                <path d="M9 18l6-6-6-6"/>
-              ) : (
-                <path d="M15 18l-6-6 6-6"/>
+          <div className="app__header-actions">
+            <button
+              className={`app__downloads-btn ${activeDownloadsCount > 0 ? 'active' : ''}`}
+              onClick={() => setShowDownloadManager(true)}
+              title="Downloads"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              </svg>
+              {activeDownloadsCount > 0 && (
+                <span className="app__downloads-badge">{activeDownloadsCount}</span>
               )}
-            </svg>
-          </button>
+            </button>
+            <button
+              className="app__sidebar-toggle"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {sidebarCollapsed ? (
+                  <path d="M9 18l6-6-6-6"/>
+                ) : (
+                  <path d="M15 18l-6-6 6-6"/>
+                )}
+              </svg>
+            </button>
+          </div>
         </div>
 
         {!sidebarCollapsed && (
@@ -324,8 +365,27 @@ function App() {
       </aside>
 
       <main className="app__main">
-        <VideoPlayer channel={activeChannel} />
+        <VideoPlayer channel={activeChannel} onDownload={handleDownload} />
       </main>
+
+      {/* Download Manager Modal */}
+      {showDownloadManager && (
+        <>
+          <div className="download-manager-overlay" onClick={() => setShowDownloadManager(false)} />
+          <DownloadManager
+            downloads={downloads}
+            onPause={pauseDownload}
+            onResume={resumeDownload}
+            onCancel={cancelDownload}
+            onRemove={removeDownload}
+            onRetry={retryDownload}
+            onSave={saveDownload}
+            onClearCompleted={clearCompleted}
+            onClearAll={clearAll}
+            onClose={() => setShowDownloadManager(false)}
+          />
+        </>
+      )}
     </div>
   );
 }

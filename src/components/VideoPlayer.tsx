@@ -6,23 +6,31 @@ import './VideoPlayer.css';
 
 interface VideoPlayerProps {
   channel: Channel | null;
+  onDownload?: (name: string, url: string) => void;
 }
 
-export function VideoPlayer({ channel }: VideoPlayerProps) {
+export function VideoPlayer({ channel, onDownload }: VideoPlayerProps) {
   const videoRef = useHls(channel?.url || null);
   const { state: recorderState, startRecording, stopRecording, pauseRecording, resumeRecording } = useRecorder();
 
   const handleDownload = useCallback(() => {
     if (!channel?.downloadUrl) return;
 
-    const link = document.createElement('a');
-    link.href = channel.downloadUrl;
-    link.download = `${channel.name}.${channel.containerExtension || 'mp4'}`;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [channel]);
+    const filename = `${channel.name}.${channel.containerExtension || 'mp4'}`;
+
+    if (onDownload) {
+      onDownload(filename, channel.downloadUrl);
+    } else {
+      // Fallback to direct download
+      const link = document.createElement('a');
+      link.href = channel.downloadUrl;
+      link.download = filename;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }, [channel, onDownload]);
 
   const handleRecord = useCallback(() => {
     if (!videoRef.current) return;
@@ -56,7 +64,7 @@ export function VideoPlayer({ channel }: VideoPlayerProps) {
     );
   }
 
-  const canDownload = channel.contentType === 'movies' || channel.contentType === 'series';
+  const canDownload = (channel.contentType === 'movies' || channel.contentType === 'series') && channel.downloadUrl;
   const canRecord = channel.contentType === 'live';
 
   return (
@@ -90,7 +98,7 @@ export function VideoPlayer({ channel }: VideoPlayerProps) {
 
         <div className="video-player__actions">
           {/* Download button for movies/series */}
-          {canDownload && channel.downloadUrl && (
+          {canDownload && (
             <button
               className="video-player__action-btn"
               onClick={handleDownload}
