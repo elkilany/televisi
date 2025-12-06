@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Channel, ChannelGroup, PlaylistInfo } from './types';
+import type { XtreamCredentials } from './utils/xtreamApi';
 import { loadPlaylistFromUrl, loadPlaylistFromFile } from './utils/m3uParser';
+import { loadPlaylistFromXtream, saveXtreamCredentials, clearXtreamCredentials } from './utils/xtreamApi';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelList } from './components/ChannelList';
 import { SearchBar } from './components/SearchBar';
@@ -72,6 +74,21 @@ function App() {
     }
   }, [handlePlaylistLoaded]);
 
+  const handleLoadXtream = useCallback(async (credentials: XtreamCredentials) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const playlist = await loadPlaylistFromXtream(credentials);
+      handlePlaylistLoaded(playlist);
+      saveXtreamCredentials(credentials);
+      localStorage.removeItem(LAST_PLAYLIST_KEY);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect to server');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [handlePlaylistLoaded]);
+
   const handleSelectChannel = useCallback((channel: Channel) => {
     setActiveChannel(channel);
   }, []);
@@ -93,6 +110,7 @@ function App() {
     setGroups([]);
     setActiveChannel(null);
     localStorage.removeItem(LAST_PLAYLIST_KEY);
+    clearXtreamCredentials();
   }, []);
 
   // Show playlist loader if no channels loaded
@@ -101,6 +119,7 @@ function App() {
       <PlaylistLoader
         onLoadUrl={handleLoadUrl}
         onLoadFile={handleLoadFile}
+        onLoadXtream={handleLoadXtream}
         isLoading={isLoading}
         error={error}
       />
