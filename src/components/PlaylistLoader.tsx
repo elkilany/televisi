@@ -20,9 +20,9 @@ export function PlaylistLoader({ onLoadUrl, onLoadFile, onLoadXtream, isLoading,
 
   // Xtream credentials state
   const savedCredentials = loadXtreamCredentials();
-  const [server, setServer] = useState(savedCredentials?.server || '');
-  const [username, setUsername] = useState(savedCredentials?.username || '');
-  const [password, setPassword] = useState(savedCredentials?.password || '');
+  const [server, setServer] = useState(savedCredentials?.server || 'http://cname.dino.ws');
+  const [username, setUsername] = useState(savedCredentials?.username || '24cb5abe89');
+  const [password, setPassword] = useState(savedCredentials?.password || '702a4052216d');
 
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
