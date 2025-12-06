@@ -45,6 +45,7 @@ export function useDownloadManager() {
 
   const controllersRef = useRef<Map<string, DownloadController>>(new Map());
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
+  const isProcessingRef = useRef(false);
 
   // Save completed downloads to localStorage
   useEffect(() => {
@@ -76,8 +77,7 @@ export function useDownloadManager() {
 
     setDownloads(prev => [newDownload, ...prev]);
 
-    // Start download automatically
-    startDownload(id, url);
+    // Don't start immediately - the queue processor will handle it
 
     return id;
   }, []);
@@ -159,14 +159,18 @@ export function useDownloadManager() {
 
       controllersRef.current.delete(id);
       speedTrackersRef.current.delete(id);
+      isProcessingRef.current = false;
 
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         // Check if it was paused or cancelled
-        const download = downloads.find(d => d.id === id);
-        if (download?.status !== 'paused' && download?.status !== 'cancelled') {
-          updateDownload(id, { status: 'cancelled' });
-        }
+        setDownloads(prev => {
+          const download = prev.find(d => d.id === id);
+          if (download?.status !== 'paused' && download?.status !== 'cancelled') {
+            return prev.map(d => d.id === id ? { ...d, status: 'cancelled' as DownloadStatus } : d);
+          }
+          return prev;
+        });
       } else {
         updateDownload(id, {
           status: 'failed',
@@ -175,8 +179,9 @@ export function useDownloadManager() {
       }
       controllersRef.current.delete(id);
       speedTrackersRef.current.delete(id);
+      isProcessingRef.current = false;
     }
-  }, [updateDownload, downloads]);
+  }, [updateDownload]);
 
   const pauseDownload = useCallback((id: string) => {
     const controller = controllersRef.current.get(id);
@@ -187,18 +192,22 @@ export function useDownloadManager() {
   }, [updateDownload]);
 
   const resumeDownload = useCallback((id: string) => {
-    const download = downloads.find(d => d.id === id);
-    if (download && (download.status === 'paused' || download.status === 'failed')) {
-      // For simplicity, restart the download (range requests would need server support)
-      updateDownload(id, {
-        status: 'pending',
-        downloaded: 0,
-        progress: 0,
-        error: undefined,
-      });
-      startDownload(id, download.url);
-    }
-  }, [downloads, startDownload, updateDownload]);
+    setDownloads(prev => {
+      const download = prev.find(d => d.id === id);
+      if (download && (download.status === 'paused' || download.status === 'failed')) {
+        // For simplicity, restart the download (range requests would need server support)
+        // Just set to pending - queue processor will start it
+        return prev.map(d => d.id === id ? {
+          ...d,
+          status: 'pending' as DownloadStatus,
+          downloaded: 0,
+          progress: 0,
+          error: undefined,
+        } : d);
+      }
+      return prev;
+    });
+  }, []);
 
   const cancelDownload = useCallback((id: string) => {
     const controller = controllersRef.current.get(id);
@@ -221,18 +230,22 @@ export function useDownloadManager() {
   }, []);
 
   const retryDownload = useCallback((id: string) => {
-    const download = downloads.find(d => d.id === id);
-    if (download && (download.status === 'failed' || download.status === 'cancelled')) {
-      updateDownload(id, {
-        status: 'pending',
-        downloaded: 0,
-        progress: 0,
-        error: undefined,
-        startedAt: Date.now(),
-      });
-      startDownload(id, download.url);
-    }
-  }, [downloads, startDownload, updateDownload]);
+    setDownloads(prev => {
+      const download = prev.find(d => d.id === id);
+      if (download && (download.status === 'failed' || download.status === 'cancelled')) {
+        // Just set to pending - queue processor will start it
+        return prev.map(d => d.id === id ? {
+          ...d,
+          status: 'pending' as DownloadStatus,
+          downloaded: 0,
+          progress: 0,
+          error: undefined,
+          startedAt: Date.now(),
+        } : d);
+      }
+      return prev;
+    });
+  }, []);
 
   const saveDownload = useCallback((id: string) => {
     const download = downloads.find(d => d.id === id);
@@ -259,8 +272,20 @@ export function useDownloadManager() {
     });
     controllersRef.current.clear();
     speedTrackersRef.current.clear();
+    isProcessingRef.current = false;
     setDownloads([]);
   }, []);
+
+  // Sequential queue processor - start next pending download when no download is active
+  useEffect(() => {
+    const hasActiveDownload = downloads.some(d => d.status === 'downloading');
+    const nextPending = downloads.find(d => d.status === 'pending');
+
+    if (!hasActiveDownload && nextPending && !isProcessingRef.current) {
+      isProcessingRef.current = true;
+      startDownload(nextPending.id, nextPending.url);
+    }
+  }, [downloads, startDownload]);
 
   // Cleanup on unmount
   useEffect(() => {
