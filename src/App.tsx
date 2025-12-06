@@ -1,26 +1,99 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Channel, ChannelGroup, PlaylistInfo } from './types';
-import type { XtreamCredentials } from './utils/xtreamApi';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { Channel, ChannelGroup, PlaylistInfo, ContentType } from './types';
+import type { XtreamCredentials, XtreamFullPlaylist } from './utils/xtreamApi';
 import { loadPlaylistFromUrl, loadPlaylistFromFile } from './utils/m3uParser';
-import { loadPlaylistFromXtream, saveXtreamCredentials, clearXtreamCredentials } from './utils/xtreamApi';
+import { loadFullPlaylistFromXtream, loadSeriesEpisodes, saveXtreamCredentials, clearXtreamCredentials, loadXtreamCredentials } from './utils/xtreamApi';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelList } from './components/ChannelList';
 import { SearchBar } from './components/SearchBar';
 import { PlaylistLoader } from './components/PlaylistLoader';
+import { ContentTypeSelector } from './components/ContentTypeSelector';
 import './App.css';
 
 const FAVORITES_KEY = 'televisi-favorites';
 const LAST_PLAYLIST_KEY = 'televisi-last-playlist';
 
 function App() {
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [groups, setGroups] = useState<ChannelGroup[]>([]);
+  // Content state
+  const [fullPlaylist, setFullPlaylist] = useState<XtreamFullPlaylist | null>(null);
+  const [m3uPlaylist, setM3uPlaylist] = useState<PlaylistInfo | null>(null);
+  const [activeContentType, setActiveContentType] = useState<ContentType>('live');
+  const [seriesEpisodes, setSeriesEpisodes] = useState<Channel[]>([]);
+  const [selectedSeries, setSelectedSeries] = useState<Channel | null>(null);
+
+  // UI state
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Get current playlist based on content type and source
+  const currentPlaylist = useMemo((): PlaylistInfo => {
+    // If viewing series episodes
+    if (selectedSeries && seriesEpisodes.length > 0) {
+      const groups: ChannelGroup[] = [];
+      const groupsMap = new Map<string, Channel[]>();
+
+      seriesEpisodes.forEach(ep => {
+        const groupName = ep.group || 'Episodes';
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, []);
+        }
+        groupsMap.get(groupName)!.push(ep);
+      });
+
+      groupsMap.forEach((channels, name) => {
+        groups.push({ name, channels });
+      });
+
+      return { channels: seriesEpisodes, groups };
+    }
+
+    // If M3U playlist loaded
+    if (m3uPlaylist) {
+      return m3uPlaylist;
+    }
+
+    // If Xtream playlist loaded
+    if (fullPlaylist) {
+      switch (activeContentType) {
+        case 'live':
+          return fullPlaylist.live;
+        case 'movies':
+          return fullPlaylist.movies;
+        case 'series':
+          return fullPlaylist.series;
+        default:
+          return fullPlaylist.live;
+      }
+    }
+
+    return { channels: [], groups: [] };
+  }, [fullPlaylist, m3uPlaylist, activeContentType, selectedSeries, seriesEpisodes]);
+
+  // Content counts for selector
+  const contentCounts = useMemo(() => {
+    if (fullPlaylist) {
+      return {
+        live: fullPlaylist.live.channels.length,
+        movies: fullPlaylist.movies.channels.length,
+        series: fullPlaylist.series.channels.length,
+      };
+    }
+    if (m3uPlaylist) {
+      return {
+        live: m3uPlaylist.channels.length,
+        movies: 0,
+        series: 0,
+      };
+    }
+    return { live: 0, movies: 0, series: 0 };
+  }, [fullPlaylist, m3uPlaylist]);
+
+  const isXtreamMode = fullPlaylist !== null;
+  const hasContent = currentPlaylist.channels.length > 0 || (fullPlaylist !== null) || (m3uPlaylist !== null);
 
   // Load favorites from localStorage on mount
   useEffect(() => {
@@ -39,47 +112,49 @@ function App() {
     localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites]));
   }, [favorites]);
 
-  const handlePlaylistLoaded = useCallback((playlist: PlaylistInfo) => {
-    setChannels(playlist.channels);
-    setGroups(playlist.groups);
-    setActiveChannel(null);
-    setError(null);
-  }, []);
-
   const handleLoadUrl = useCallback(async (url: string) => {
     setIsLoading(true);
     setError(null);
     try {
       const playlist = await loadPlaylistFromUrl(url);
-      handlePlaylistLoaded(playlist);
+      setM3uPlaylist(playlist);
+      setFullPlaylist(null);
+      setActiveChannel(null);
+      setActiveContentType('live');
       localStorage.setItem(LAST_PLAYLIST_KEY, url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load playlist');
     } finally {
       setIsLoading(false);
     }
-  }, [handlePlaylistLoaded]);
+  }, []);
 
   const handleLoadFile = useCallback(async (file: File) => {
     setIsLoading(true);
     setError(null);
     try {
       const playlist = await loadPlaylistFromFile(file);
-      handlePlaylistLoaded(playlist);
+      setM3uPlaylist(playlist);
+      setFullPlaylist(null);
+      setActiveChannel(null);
+      setActiveContentType('live');
       localStorage.removeItem(LAST_PLAYLIST_KEY);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load playlist');
     } finally {
       setIsLoading(false);
     }
-  }, [handlePlaylistLoaded]);
+  }, []);
 
   const handleLoadXtream = useCallback(async (credentials: XtreamCredentials) => {
     setIsLoading(true);
     setError(null);
     try {
-      const playlist = await loadPlaylistFromXtream(credentials);
-      handlePlaylistLoaded(playlist);
+      const playlist = await loadFullPlaylistFromXtream(credentials);
+      setFullPlaylist(playlist);
+      setM3uPlaylist(null);
+      setActiveChannel(null);
+      setActiveContentType('live');
       saveXtreamCredentials(credentials);
       localStorage.removeItem(LAST_PLAYLIST_KEY);
     } catch (err) {
@@ -87,10 +162,34 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [handlePlaylistLoaded]);
+  }, []);
 
-  const handleSelectChannel = useCallback((channel: Channel) => {
-    setActiveChannel(channel);
+  const handleSelectChannel = useCallback(async (channel: Channel) => {
+    // If selecting a series, load its episodes
+    if (channel.contentType === 'series' && channel.seriesId && !channel.url) {
+      const credentials = loadXtreamCredentials();
+      if (credentials) {
+        setIsLoading(true);
+        try {
+          const episodes = await loadSeriesEpisodes(credentials, channel.seriesId);
+          setSeriesEpisodes(episodes);
+          setSelectedSeries(channel);
+          setActiveChannel(null);
+        } catch (err) {
+          setError('Failed to load episodes');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    } else {
+      setActiveChannel(channel);
+    }
+  }, []);
+
+  const handleBackFromSeries = useCallback(() => {
+    setSelectedSeries(null);
+    setSeriesEpisodes([]);
+    setActiveChannel(null);
   }, []);
 
   const handleToggleFavorite = useCallback((channel: Channel) => {
@@ -105,16 +204,26 @@ function App() {
     });
   }, []);
 
-  const handleClearPlaylist = useCallback(() => {
-    setChannels([]);
-    setGroups([]);
+  const handleContentTypeChange = useCallback((type: ContentType) => {
+    setActiveContentType(type);
     setActiveChannel(null);
+    setSelectedSeries(null);
+    setSeriesEpisodes([]);
+    setSearchQuery('');
+  }, []);
+
+  const handleClearPlaylist = useCallback(() => {
+    setFullPlaylist(null);
+    setM3uPlaylist(null);
+    setActiveChannel(null);
+    setSelectedSeries(null);
+    setSeriesEpisodes([]);
     localStorage.removeItem(LAST_PLAYLIST_KEY);
     clearXtreamCredentials();
   }, []);
 
-  // Show playlist loader if no channels loaded
-  if (channels.length === 0) {
+  // Show playlist loader if no content loaded
+  if (!hasContent) {
     return (
       <PlaylistLoader
         onLoadUrl={handleLoadUrl}
@@ -153,18 +262,52 @@ function App() {
 
         {!sidebarCollapsed && (
           <>
+            {/* Content type selector for Xtream mode */}
+            {isXtreamMode && !selectedSeries && (
+              <div className="app__content-type">
+                <ContentTypeSelector
+                  activeType={activeContentType}
+                  onChange={handleContentTypeChange}
+                  counts={contentCounts}
+                />
+              </div>
+            )}
+
+            {/* Back button when viewing series episodes */}
+            {selectedSeries && (
+              <div className="app__series-header">
+                <button
+                  className="app__back-btn"
+                  onClick={handleBackFromSeries}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                  </svg>
+                  Back to Series
+                </button>
+                <div className="app__series-title">
+                  {selectedSeries.logo && (
+                    <img src={selectedSeries.logo} alt={selectedSeries.name} />
+                  )}
+                  <span>{selectedSeries.name}</span>
+                </div>
+              </div>
+            )}
+
             <div className="app__search">
               <SearchBar value={searchQuery} onChange={setSearchQuery} />
             </div>
+
             <ChannelList
-              channels={channels}
-              groups={groups}
+              channels={currentPlaylist.channels}
+              groups={currentPlaylist.groups}
               activeChannel={activeChannel}
               favorites={favorites}
               onSelectChannel={handleSelectChannel}
               onToggleFavorite={handleToggleFavorite}
               searchQuery={searchQuery}
             />
+
             <div className="app__sidebar-footer">
               <button
                 className="app__change-playlist"

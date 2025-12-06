@@ -41,6 +41,8 @@ export function parseM3U(content: string): PlaylistInfo {
         group: currentChannel.group || 'Uncategorized',
         tvgId: currentChannel.tvgId,
         tvgName: currentChannel.tvgName,
+        contentType: 'live', // M3U playlists are typically live streams
+        downloadUrl: line, // Allow download of any stream
       };
 
       channels.push(channel);

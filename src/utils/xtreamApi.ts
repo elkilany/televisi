@@ -1,4 +1,4 @@
-import type { Channel, ChannelGroup, PlaylistInfo } from '../types';
+import type { Channel, ChannelGroup, PlaylistInfo, ContentType } from '../types';
 
 export interface XtreamCredentials {
   server: string;
@@ -30,7 +30,7 @@ interface XtreamCategory {
   parent_id: number;
 }
 
-interface XtreamStream {
+interface XtreamLiveStream {
   num: number;
   name: string;
   stream_type: string;
@@ -45,9 +45,79 @@ interface XtreamStream {
   tv_archive_duration: number;
 }
 
+interface XtreamVodStream {
+  num: number;
+  name: string;
+  stream_type: string;
+  stream_id: number;
+  stream_icon: string;
+  added: string;
+  category_id: string;
+  container_extension: string;
+  custom_sid: string;
+  direct_source: string;
+}
+
+interface XtreamSeries {
+  num: number;
+  name: string;
+  series_id: number;
+  cover: string;
+  plot: string;
+  cast: string;
+  director: string;
+  genre: string;
+  releaseDate: string;
+  last_modified: string;
+  rating: string;
+  rating_5based: number;
+  backdrop_path: string[];
+  youtube_trailer: string;
+  episode_run_time: string;
+  category_id: string;
+}
+
+interface XtreamSeriesInfo {
+  seasons: { [key: string]: XtreamEpisode[] };
+  info: {
+    name: string;
+    cover: string;
+    plot: string;
+    cast: string;
+    director: string;
+    genre: string;
+    releaseDate: string;
+    rating: string;
+  };
+  episodes: { [key: string]: XtreamEpisode[] };
+}
+
+interface XtreamEpisode {
+  id: string;
+  episode_num: number;
+  title: string;
+  container_extension: string;
+  info: {
+    movie_image?: string;
+    plot?: string;
+    releasedate?: string;
+    duration_secs?: number;
+  };
+  custom_sid: string;
+  added: string;
+  season: number;
+  direct_source: string;
+}
+
 export interface XtreamAuthResponse {
   user_info: XtreamUserInfo;
   server_info: XtreamServerInfo;
+}
+
+export interface XtreamFullPlaylist {
+  live: PlaylistInfo;
+  movies: PlaylistInfo;
+  series: PlaylistInfo;
 }
 
 /**
@@ -93,66 +163,96 @@ export async function authenticateXtream(credentials: XtreamCredentials): Promis
 }
 
 /**
- * Get live TV categories from Xtream server
+ * Generic function to fetch categories
  */
-async function getLiveCategories(credentials: XtreamCredentials): Promise<XtreamCategory[]> {
+async function getCategories(credentials: XtreamCredentials, action: string): Promise<XtreamCategory[]> {
   const server = normalizeServerUrl(credentials.server);
-  const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=get_live_categories`;
+  const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=${action}`;
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to get categories: ${response.statusText}`);
+    return [];
   }
 
-  return response.json();
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 }
 
 /**
  * Get live TV streams from Xtream server
  */
-async function getLiveStreams(credentials: XtreamCredentials): Promise<XtreamStream[]> {
+async function getLiveStreams(credentials: XtreamCredentials): Promise<XtreamLiveStream[]> {
   const server = normalizeServerUrl(credentials.server);
   const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=get_live_streams`;
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to get streams: ${response.statusText}`);
+    return [];
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Get VOD (movies) streams from Xtream server
+ */
+async function getVodStreams(credentials: XtreamCredentials): Promise<XtreamVodStream[]> {
+  const server = normalizeServerUrl(credentials.server);
+  const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=get_vod_streams`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return [];
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Get series list from Xtream server
+ */
+async function getSeriesList(credentials: XtreamCredentials): Promise<XtreamSeries[]> {
+  const server = normalizeServerUrl(credentials.server);
+  const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=get_series`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return [];
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Get series info (episodes) from Xtream server
+ */
+export async function getSeriesInfo(credentials: XtreamCredentials, seriesId: number): Promise<XtreamSeriesInfo | null> {
+  const server = normalizeServerUrl(credentials.server);
+  const url = `${server}/player_api.php?username=${encodeURIComponent(credentials.username)}&password=${encodeURIComponent(credentials.password)}&action=get_series_info&series_id=${seriesId}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return null;
   }
 
   return response.json();
 }
 
 /**
- * Load playlist from Xtream Codes server
+ * Convert streams to channels with grouping
  */
-export async function loadPlaylistFromXtream(credentials: XtreamCredentials): Promise<PlaylistInfo> {
-  const server = normalizeServerUrl(credentials.server);
-
-  // Fetch categories and streams in parallel
-  const [categories, streams] = await Promise.all([
-    getLiveCategories(credentials),
-    getLiveStreams(credentials),
-  ]);
-
-  // Create category lookup map
-  const categoryMap = new Map<string, string>();
-  categories.forEach(cat => {
-    categoryMap.set(cat.category_id, cat.category_name);
-  });
-
-  // Convert streams to channels
-  const channels: Channel[] = streams.map((stream) => {
-    const streamUrl = `${server}/live/${encodeURIComponent(credentials.username)}/${encodeURIComponent(credentials.password)}/${stream.stream_id}.m3u8`;
-
-    return {
-      id: `xtream-${stream.stream_id}`,
-      name: stream.name,
-      url: streamUrl,
-      logo: stream.stream_icon || undefined,
-      group: categoryMap.get(stream.category_id) || 'Uncategorized',
-      tvgId: stream.epg_channel_id || undefined,
-      tvgName: stream.name,
-    };
+function processChannels(
+  channels: Channel[],
+  categoryMap: Map<string, string>
+): { channels: Channel[]; groups: ChannelGroup[] } {
+  // Update group names from category map
+  channels.forEach(channel => {
+    if (channel.group && categoryMap.has(channel.group)) {
+      channel.group = categoryMap.get(channel.group);
+    }
   });
 
   // Group channels by category
@@ -171,6 +271,153 @@ export async function loadPlaylistFromXtream(credentials: XtreamCredentials): Pr
   }));
 
   return { channels, groups };
+}
+
+/**
+ * Load full playlist from Xtream Codes server (Live, Movies, Series)
+ */
+export async function loadFullPlaylistFromXtream(credentials: XtreamCredentials): Promise<XtreamFullPlaylist> {
+  const server = normalizeServerUrl(credentials.server);
+
+  // Fetch all categories and streams in parallel
+  const [
+    liveCategories,
+    vodCategories,
+    seriesCategories,
+    liveStreams,
+    vodStreams,
+    seriesList,
+  ] = await Promise.all([
+    getCategories(credentials, 'get_live_categories'),
+    getCategories(credentials, 'get_vod_categories'),
+    getCategories(credentials, 'get_series_categories'),
+    getLiveStreams(credentials),
+    getVodStreams(credentials),
+    getSeriesList(credentials),
+  ]);
+
+  // Create category lookup maps
+  const liveCategoryMap = new Map<string, string>();
+  liveCategories.forEach(cat => liveCategoryMap.set(cat.category_id, cat.category_name));
+
+  const vodCategoryMap = new Map<string, string>();
+  vodCategories.forEach(cat => vodCategoryMap.set(cat.category_id, cat.category_name));
+
+  const seriesCategoryMap = new Map<string, string>();
+  seriesCategories.forEach(cat => seriesCategoryMap.set(cat.category_id, cat.category_name));
+
+  // Convert live streams to channels
+  const liveChannels: Channel[] = liveStreams.map((stream) => {
+    const streamUrl = `${server}/live/${encodeURIComponent(credentials.username)}/${encodeURIComponent(credentials.password)}/${stream.stream_id}.m3u8`;
+
+    return {
+      id: `live-${stream.stream_id}`,
+      name: stream.name,
+      url: streamUrl,
+      logo: stream.stream_icon || undefined,
+      group: stream.category_id,
+      tvgId: stream.epg_channel_id || undefined,
+      tvgName: stream.name,
+      contentType: 'live' as ContentType,
+    };
+  });
+
+  // Convert VOD streams to channels
+  const movieChannels: Channel[] = vodStreams.map((stream) => {
+    const ext = stream.container_extension || 'mp4';
+    const streamUrl = `${server}/movie/${encodeURIComponent(credentials.username)}/${encodeURIComponent(credentials.password)}/${stream.stream_id}.${ext}`;
+    const downloadUrl = streamUrl; // Same URL can be used for download
+
+    return {
+      id: `movie-${stream.stream_id}`,
+      name: stream.name,
+      url: streamUrl,
+      logo: stream.stream_icon || undefined,
+      group: stream.category_id,
+      contentType: 'movies' as ContentType,
+      containerExtension: ext,
+      downloadUrl,
+    };
+  });
+
+  // Convert series to channels (each series as an entry, episodes loaded on demand)
+  const seriesChannels: Channel[] = seriesList.map((series) => {
+    return {
+      id: `series-${series.series_id}`,
+      name: series.name,
+      url: '', // Series don't have direct URLs, episodes do
+      logo: series.cover || undefined,
+      group: series.category_id,
+      contentType: 'series' as ContentType,
+      seriesId: series.series_id,
+    };
+  });
+
+  // Process and group channels
+  const live = processChannels(liveChannels, liveCategoryMap);
+  const movies = processChannels(movieChannels, vodCategoryMap);
+  const series = processChannels(seriesChannels, seriesCategoryMap);
+
+  return {
+    live: { channels: live.channels, groups: live.groups },
+    movies: { channels: movies.channels, groups: movies.groups },
+    series: { channels: series.channels, groups: series.groups },
+  };
+}
+
+/**
+ * Load series episodes
+ */
+export async function loadSeriesEpisodes(credentials: XtreamCredentials, seriesId: number): Promise<Channel[]> {
+  const server = normalizeServerUrl(credentials.server);
+  const seriesInfo = await getSeriesInfo(credentials, seriesId);
+
+  if (!seriesInfo || !seriesInfo.episodes) {
+    return [];
+  }
+
+  const episodes: Channel[] = [];
+
+  // Episodes are grouped by season number
+  Object.entries(seriesInfo.episodes).forEach(([seasonNum, seasonEpisodes]) => {
+    seasonEpisodes.forEach((episode) => {
+      const ext = episode.container_extension || 'mp4';
+      const streamUrl = `${server}/series/${encodeURIComponent(credentials.username)}/${encodeURIComponent(credentials.password)}/${episode.id}.${ext}`;
+
+      episodes.push({
+        id: `episode-${episode.id}`,
+        name: `S${seasonNum}E${episode.episode_num}: ${episode.title}`,
+        url: streamUrl,
+        logo: episode.info?.movie_image || seriesInfo.info?.cover || undefined,
+        group: `Season ${seasonNum}`,
+        contentType: 'series' as ContentType,
+        containerExtension: ext,
+        downloadUrl: streamUrl,
+        seriesId,
+        seasonNumber: parseInt(seasonNum),
+        episodeNumber: episode.episode_num,
+        episodeTitle: episode.title,
+      });
+    });
+  });
+
+  // Sort by season and episode number
+  episodes.sort((a, b) => {
+    if (a.seasonNumber !== b.seasonNumber) {
+      return (a.seasonNumber || 0) - (b.seasonNumber || 0);
+    }
+    return (a.episodeNumber || 0) - (b.episodeNumber || 0);
+  });
+
+  return episodes;
+}
+
+/**
+ * Legacy function for backward compatibility - loads only live streams
+ */
+export async function loadPlaylistFromXtream(credentials: XtreamCredentials): Promise<PlaylistInfo> {
+  const full = await loadFullPlaylistFromXtream(credentials);
+  return full.live;
 }
 
 /**

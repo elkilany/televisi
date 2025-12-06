@@ -5,6 +5,7 @@
   border-radius: 8px;
   overflow: hidden;
   height: 100%;
+  position: relative;
 }
 
 .video-player--empty {
@@ -43,6 +44,7 @@
   gap: 1rem;
   padding: 1rem;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.7));
+  flex-wrap: wrap;
 }
 
 .video-player__logo {
@@ -51,10 +53,12 @@
   object-fit: contain;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
 .video-player__details {
   flex: 1;
+  min-width: 150px;
 }
 
 .video-player__title {
@@ -67,4 +71,110 @@
 .video-player__group {
   font-size: 0.85rem;
   color: #94a3b8;
+}
+
+/* Action buttons */
+.video-player__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.video-player__action-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #f1f5f9;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.video-player__action-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.video-player__action-btn.recording {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.video-player__action-btn.recording:hover {
+  background: rgba(239, 68, 68, 0.4);
+}
+
+.video-player__action-btn svg {
+  flex-shrink: 0;
+}
+
+.video-player__action-btn span {
+  white-space: nowrap;
+}
+
+/* Recording pulse animation */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Error message */
+.video-player__error {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.75rem 1.5rem;
+  background: rgba(239, 68, 68, 0.9);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.875rem;
+  z-index: 10;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .video-player__action-btn span {
+    display: none;
+  }
+
+  .video-player__action-btn {
+    padding: 0.625rem;
+  }
+
+  .video-player__info {
+    padding: 0.75rem;
+  }
+
+  .video-player__logo {
+    width: 40px;
+    height: 40px;
+  }
+
+  .video-player__title {
+    font-size: 1rem;
+  }
 }
