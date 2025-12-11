@@ -1,3 +1,4 @@
+import { memo, useEffect, useRef, useState } from 'react';
 import type { Channel } from '../types';
 import './ChannelCard.css';
 
@@ -9,7 +10,51 @@ interface ChannelCardProps {
   onToggleFavorite: (channel: Channel) => void;
 }
 
-export function ChannelCard({
+// Lazy loaded image component
+function LazyImage({ src, alt }: { src: string; alt: string }) {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [isInView, setIsInView] = useState(false);
+  const imgRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '100px' }
+    );
+
+    if (imgRef.current) {
+      observer.observe(imgRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  if (hasError) {
+    return null;
+  }
+
+  return (
+    <div ref={imgRef} className="channel-card__logo-wrapper">
+      {isInView && (
+        <img
+          src={src}
+          alt={alt}
+          className={`channel-card__logo ${isLoaded ? 'loaded' : ''}`}
+          onLoad={() => setIsLoaded(true)}
+          onError={() => setHasError(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+export const ChannelCard = memo(function ChannelCard({
   channel,
   isActive,
   isFavorite,
@@ -23,15 +68,7 @@ export function ChannelCard({
     >
       <div className="channel-card__logo-container">
         {channel.logo ? (
-          <img
-            src={channel.logo}
-            alt={channel.name}
-            className="channel-card__logo"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-            }}
-          />
+          <LazyImage src={channel.logo} alt={channel.name} />
         ) : null}
         <div className={`channel-card__logo-placeholder ${channel.logo ? 'hidden' : ''}`}>
           {channel.name.charAt(0).toUpperCase()}
@@ -57,4 +94,4 @@ export function ChannelCard({
       </button>
     </div>
   );
-}
+});

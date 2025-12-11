@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, type ReactElement } from 'react';
+import { List } from 'react-window';
 import type { Channel, ChannelGroup } from '../types';
 import { ChannelCard } from './ChannelCard';
 import './ChannelList.css';
@@ -15,6 +16,45 @@ interface ChannelListProps {
 
 type FilterMode = 'all' | 'favorites' | 'group';
 
+const ITEM_HEIGHT = 72; // Height of each channel card in pixels
+
+// Custom row props (without index and style, which are provided by List)
+interface CustomRowProps {
+  channels: Channel[];
+  activeChannel: Channel | null;
+  favorites: Set<string>;
+  onSelectChannel: (channel: Channel) => void;
+  onToggleFavorite: (channel: Channel) => void;
+}
+
+// Row component for react-window v2
+function RowComponent({
+  index,
+  style,
+  channels,
+  activeChannel,
+  favorites,
+  onSelectChannel,
+  onToggleFavorite,
+}: {
+  index: number;
+  style: React.CSSProperties;
+} & CustomRowProps): ReactElement {
+  const channel = channels[index];
+
+  return (
+    <div style={{ ...style, paddingRight: '1rem', paddingLeft: '1rem' }}>
+      <ChannelCard
+        channel={channel}
+        isActive={activeChannel?.id === channel.id}
+        isFavorite={favorites.has(channel.id)}
+        onSelect={onSelectChannel}
+        onToggleFavorite={onToggleFavorite}
+      />
+    </div>
+  );
+}
+
 export function ChannelList({
   channels,
   groups,
@@ -26,7 +66,9 @@ export function ChannelList({
 }: ChannelListProps) {
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [listHeight, setListHeight] = useState(400);
 
+  // Memoized filtered channels
   const filteredChannels = useMemo(() => {
     let result = channels;
 
@@ -49,6 +91,28 @@ export function ChannelList({
 
     return result;
   }, [channels, searchQuery, filterMode, selectedGroup, favorites]);
+
+  // Measure container height
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      const resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setListHeight(entry.contentRect.height);
+        }
+      });
+      resizeObserver.observe(node);
+      setListHeight(node.clientHeight);
+    }
+  }, []);
+
+  // Create row props for react-window v2
+  const rowProps: CustomRowProps = useMemo(() => ({
+    channels: filteredChannels,
+    activeChannel,
+    favorites,
+    onSelectChannel,
+    onToggleFavorite,
+  }), [filteredChannels, activeChannel, favorites, onSelectChannel, onToggleFavorite]);
 
   return (
     <div className="channel-list">
@@ -91,22 +155,21 @@ export function ChannelList({
         {filteredChannels.length} channel{filteredChannels.length !== 1 ? 's' : ''}
       </div>
 
-      <div className="channel-list__items">
+      <div className="channel-list__items" ref={containerRef}>
         {filteredChannels.length === 0 ? (
           <div className="channel-list__empty">
             {searchQuery ? 'No channels found' : 'No channels available'}
           </div>
         ) : (
-          filteredChannels.map((channel) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              isActive={activeChannel?.id === channel.id}
-              isFavorite={favorites.has(channel.id)}
-              onSelect={onSelectChannel}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))
+          <List<CustomRowProps>
+            rowComponent={RowComponent}
+            rowCount={filteredChannels.length}
+            rowHeight={ITEM_HEIGHT}
+            rowProps={rowProps}
+            overscanCount={5}
+            defaultHeight={listHeight}
+            style={{ height: listHeight }}
+          />
         )}
       </div>
     </div>

@@ -8,6 +8,8 @@
   cursor: pointer;
   transition: all 0.2s ease;
   border: 1px solid transparent;
+  height: 64px;
+  box-sizing: border-box;
 }
 
 .channel-card:hover {
@@ -27,12 +29,24 @@
   position: relative;
 }
 
+.channel-card__logo-wrapper {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
 .channel-card__logo {
   width: 100%;
   height: 100%;
   object-fit: contain;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.channel-card__logo.loaded {
+  opacity: 1;
 }
 
 .channel-card__logo-placeholder {

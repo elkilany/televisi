@@ -4,6 +4,7 @@ import type { XtreamCredentials, XtreamFullPlaylist } from './utils/xtreamApi';
 import { loadPlaylistFromUrl, loadPlaylistFromFile } from './utils/m3uParser';
 import { loadFullPlaylistFromXtream, loadSeriesEpisodes, saveXtreamCredentials, clearXtreamCredentials, loadXtreamCredentials } from './utils/xtreamApi';
 import { useDownloadManager } from './hooks/useDownloadManager';
+import { useDebounce } from './hooks/useDebounce';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelList } from './components/ChannelList';
 import { SearchBar } from './components/SearchBar';
@@ -27,6 +28,7 @@ function App() {
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -346,7 +348,7 @@ function App() {
               favorites={favorites}
               onSelectChannel={handleSelectChannel}
               onToggleFavorite={handleToggleFavorite}
-              searchQuery={searchQuery}
+              searchQuery={debouncedSearchQuery}
             />
 
             <div className="app__sidebar-footer">
