@@ -24,8 +24,8 @@ interface DownloadController {
 }
 
 const STORAGE_KEY = 'televisi-downloads';
-const DOWNLOAD_DELAY_MS = 3000; // 3 second delay between downloads to avoid server rate limiting
-const CHUNK_THROTTLE_MS = 100; // Throttle between chunk reads to limit download speed
+const DOWNLOAD_DELAY_MS = 5000; // 5 second delay between downloads
+const CHUNK_THROTTLE_MS = 500; // 500ms throttle between chunk reads to limit download speed
 
 // File System Access API types
 declare global {
