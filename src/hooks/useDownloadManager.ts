@@ -24,6 +24,8 @@ interface DownloadController {
 }
 
 const STORAGE_KEY = 'televisi-downloads';
+const DOWNLOAD_DELAY_MS = 3000; // 3 second delay between downloads to avoid server rate limiting
+const THROTTLE_DELAY_MS = 50; // Delay between chunk reads for throttling
 
 // File System Access API types
 declare global {
@@ -58,6 +60,7 @@ export function useDownloadManager() {
   const controllersRef = useRef<Map<string, DownloadController>>(new Map());
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
   const isProcessingRef = useRef(false);
+  const lastDownloadCompletedRef = useRef<number>(0); // Track when the last download completed
 
   // Save completed downloads to localStorage
   useEffect(() => {
@@ -227,6 +230,9 @@ export function useDownloadManager() {
             });
           }
         }
+
+        // Throttle download speed to avoid server rate limiting
+        await new Promise(resolve => setTimeout(resolve, THROTTLE_DELAY_MS));
       }
 
       // Combine chunks into blob
@@ -259,6 +265,7 @@ export function useDownloadManager() {
       controllersRef.current.delete(id);
       speedTrackersRef.current.delete(id);
       isProcessingRef.current = false;
+      lastDownloadCompletedRef.current = Date.now(); // Track completion time for cooldown
 
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
@@ -387,26 +394,49 @@ export function useDownloadManager() {
 
   // Sequential queue processor - start next pending download when no download is active
   useEffect(() => {
-    // Use functional update to atomically check and claim the next download
-    setDownloads(prev => {
-      const hasActiveDownload = prev.some(d => d.status === 'downloading');
-      const nextPending = prev.find(d => d.status === 'pending');
+    const hasActiveDownload = downloads.some(d => d.status === 'downloading');
+    const nextPending = downloads.find(d => d.status === 'pending');
 
-      // Only start if no active download and there's a pending one
-      if (!hasActiveDownload && nextPending) {
-        // Mark as downloading immediately to prevent race conditions
-        const updated = prev.map(d =>
-          d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
-        );
+    // Only process if no active download and there's a pending one
+    if (!hasActiveDownload && nextPending) {
+      // Check if we need to wait for cooldown
+      const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
+      const cooldownRemaining = DOWNLOAD_DELAY_MS - timeSinceLastDownload;
 
-        // Start the actual download (fire and forget)
-        startDownload(nextPending.id, nextPending.url);
+      if (cooldownRemaining > 0 && lastDownloadCompletedRef.current > 0) {
+        // Wait for cooldown before starting next download
+        const timeout = setTimeout(() => {
+          setDownloads(prev => {
+            const stillPending = prev.find(d => d.id === nextPending.id && d.status === 'pending');
+            const stillNoActive = !prev.some(d => d.status === 'downloading');
 
-        return updated;
+            if (stillPending && stillNoActive) {
+              startDownload(stillPending.id, stillPending.url);
+              return prev.map(d =>
+                d.id === stillPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+              );
+            }
+            return prev;
+          });
+        }, cooldownRemaining);
+
+        return () => clearTimeout(timeout);
+      } else {
+        // No cooldown needed, start immediately
+        setDownloads(prev => {
+          const stillPending = prev.find(d => d.id === nextPending.id && d.status === 'pending');
+          const stillNoActive = !prev.some(d => d.status === 'downloading');
+
+          if (stillPending && stillNoActive) {
+            startDownload(stillPending.id, stillPending.url);
+            return prev.map(d =>
+              d.id === stillPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+            );
+          }
+          return prev;
+        });
       }
-
-      return prev;
-    });
+    }
   }, [downloads, startDownload]);
 
   // Cleanup on unmount
