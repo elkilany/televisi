@@ -391,49 +391,40 @@ export function useDownloadManager() {
 
   // Sequential queue processor - start next pending download when no download is active
   useEffect(() => {
+    // Prevent multiple simultaneous processing
+    if (isProcessingRef.current) return;
+
     const hasActiveDownload = downloads.some(d => d.status === 'downloading');
+    if (hasActiveDownload) return;
+
     const nextPending = downloads.find(d => d.status === 'pending');
+    if (!nextPending) return;
 
-    // Only process if no active download and there's a pending one
-    if (!hasActiveDownload && nextPending) {
-      // Check if we need to wait for cooldown
-      const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
-      const cooldownRemaining = DOWNLOAD_DELAY_MS - timeSinceLastDownload;
+    // Check cooldown
+    const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
+    const cooldownRemaining = DOWNLOAD_DELAY_MS - timeSinceLastDownload;
 
-      if (cooldownRemaining > 0 && lastDownloadCompletedRef.current > 0) {
-        // Wait for cooldown before starting next download
-        const timeout = setTimeout(() => {
-          setDownloads(prev => {
-            const stillPending = prev.find(d => d.id === nextPending.id && d.status === 'pending');
-            const stillNoActive = !prev.some(d => d.status === 'downloading');
+    if (cooldownRemaining > 0 && lastDownloadCompletedRef.current > 0) {
+      // Wait for cooldown
+      const timeout = setTimeout(() => {
+        // Trigger re-evaluation
+        setDownloads(prev => [...prev]);
+      }, cooldownRemaining + 100);
 
-            if (stillPending && stillNoActive) {
-              startDownload(stillPending.id, stillPending.url);
-              return prev.map(d =>
-                d.id === stillPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
-              );
-            }
-            return prev;
-          });
-        }, cooldownRemaining);
-
-        return () => clearTimeout(timeout);
-      } else {
-        // No cooldown needed, start immediately
-        setDownloads(prev => {
-          const stillPending = prev.find(d => d.id === nextPending.id && d.status === 'pending');
-          const stillNoActive = !prev.some(d => d.status === 'downloading');
-
-          if (stillPending && stillNoActive) {
-            startDownload(stillPending.id, stillPending.url);
-            return prev.map(d =>
-              d.id === stillPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
-            );
-          }
-          return prev;
-        });
-      }
+      return () => clearTimeout(timeout);
     }
+
+    // Mark as processing to prevent race conditions
+    isProcessingRef.current = true;
+
+    // Update status and start download
+    setDownloads(prev =>
+      prev.map(d =>
+        d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+      )
+    );
+
+    startDownload(nextPending.id, nextPending.url);
   }, [downloads, startDownload]);
 
   // Cleanup on unmount
