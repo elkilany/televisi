@@ -25,6 +25,7 @@ interface DownloadController {
 
 const STORAGE_KEY = 'televisi-downloads';
 const DOWNLOAD_DELAY_MS = 3000; // 3 second delay between downloads to avoid server rate limiting
+const CHUNK_THROTTLE_MS = 100; // Throttle between chunk reads to limit download speed
 
 // File System Access API types
 declare global {
@@ -259,6 +260,8 @@ export function useDownloadManager() {
           }
         }
 
+        // Throttle download speed to respect server limits
+        await new Promise(resolve => setTimeout(resolve, CHUNK_THROTTLE_MS));
       }
 
       // Combine chunks into blob
