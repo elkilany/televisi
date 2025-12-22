@@ -86,7 +86,7 @@ export function useDownloadManager() {
     const abortController = new AbortController();
 
     try {
-      updateDownload(id, { status: 'downloading' });
+      // Status is already set to 'downloading' by the queue processor
 
       const response = await fetch(url, {
         signal: abortController.signal,
@@ -278,13 +278,26 @@ export function useDownloadManager() {
 
   // Sequential queue processor - start next pending download when no download is active
   useEffect(() => {
-    const hasActiveDownload = downloads.some(d => d.status === 'downloading');
-    const nextPending = downloads.find(d => d.status === 'pending');
+    // Use functional update to atomically check and claim the next download
+    setDownloads(prev => {
+      const hasActiveDownload = prev.some(d => d.status === 'downloading');
+      const nextPending = prev.find(d => d.status === 'pending');
 
-    if (!hasActiveDownload && nextPending && !isProcessingRef.current) {
-      isProcessingRef.current = true;
-      startDownload(nextPending.id, nextPending.url);
-    }
+      // Only start if no active download and there's a pending one
+      if (!hasActiveDownload && nextPending) {
+        // Mark as downloading immediately to prevent race conditions
+        const updated = prev.map(d =>
+          d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+        );
+
+        // Start the actual download (fire and forget)
+        startDownload(nextPending.id, nextPending.url);
+
+        return updated;
+      }
+
+      return prev;
+    });
   }, [downloads, startDownload]);
 
   // Cleanup on unmount
