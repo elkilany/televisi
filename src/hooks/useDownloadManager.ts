@@ -15,6 +15,7 @@ export interface DownloadItem {
   completedAt?: number;
   speed: number; // bytes per second
   blob?: Blob;
+  savedToFolder?: boolean;
 }
 
 interface DownloadController {
@@ -23,6 +24,13 @@ interface DownloadController {
 }
 
 const STORAGE_KEY = 'televisi-downloads';
+
+// File System Access API types
+declare global {
+  interface Window {
+    showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+  }
+}
 
 export function useDownloadManager() {
   const [downloads, setDownloads] = useState<DownloadItem[]>(() => {
@@ -43,6 +51,10 @@ export function useDownloadManager() {
     return [];
   });
 
+  const [downloadFolder, setDownloadFolder] = useState<FileSystemDirectoryHandle | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
+  const [autoSave, setAutoSave] = useState(true);
+
   const controllersRef = useRef<Map<string, DownloadController>>(new Map());
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
   const isProcessingRef = useRef(false);
@@ -60,6 +72,56 @@ export function useDownloadManager() {
     setDownloads(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
   }, []);
 
+  // Select download folder using File System Access API
+  const selectDownloadFolder = useCallback(async () => {
+    if (!window.showDirectoryPicker) {
+      alert('Your browser does not support folder selection. Please use Chrome or Edge.');
+      return false;
+    }
+
+    try {
+      const handle = await window.showDirectoryPicker();
+      setDownloadFolder(handle);
+      setFolderName(handle.name);
+      return true;
+    } catch (error) {
+      // User cancelled or error
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Failed to select folder:', error);
+      }
+      return false;
+    }
+  }, []);
+
+  // Clear download folder
+  const clearDownloadFolder = useCallback(() => {
+    setDownloadFolder(null);
+    setFolderName(null);
+  }, []);
+
+  // Save blob directly to the selected folder
+  const saveToFolder = useCallback(async (name: string, blob: Blob): Promise<boolean> => {
+    if (!downloadFolder) return false;
+
+    try {
+      // Sanitize filename
+      const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+      const fileHandle = await downloadFolder.getFileHandle(safeName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    } catch (error) {
+      console.error('Failed to save to folder:', error);
+      // Permission might have been revoked
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        setDownloadFolder(null);
+        setFolderName(null);
+      }
+      return false;
+    }
+  }, [downloadFolder]);
+
   const addDownload = useCallback((name: string, url: string): string => {
     const id = `download-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -73,6 +135,7 @@ export function useDownloadManager() {
       status: 'pending',
       startedAt: Date.now(),
       speed: 0,
+      savedToFolder: false,
     };
 
     setDownloads(prev => [newDownload, ...prev]);
@@ -147,6 +210,20 @@ export function useDownloadManager() {
       // Combine chunks into blob
       const blob = new Blob(chunks);
 
+      // Get download name for auto-save
+      setDownloads(prev => {
+        const download = prev.find(d => d.id === id);
+        if (download && downloadFolder && autoSave) {
+          // Auto-save to folder
+          saveToFolder(download.name, blob).then(saved => {
+            if (saved) {
+              updateDownload(id, { savedToFolder: true });
+            }
+          });
+        }
+        return prev;
+      });
+
       updateDownload(id, {
         status: 'completed',
         progress: 100,
@@ -181,7 +258,7 @@ export function useDownloadManager() {
       speedTrackersRef.current.delete(id);
       isProcessingRef.current = false;
     }
-  }, [updateDownload]);
+  }, [updateDownload, downloadFolder, autoSave, saveToFolder]);
 
   const pauseDownload = useCallback((id: string) => {
     const controller = controllersRef.current.get(id);
@@ -247,19 +324,29 @@ export function useDownloadManager() {
     });
   }, []);
 
-  const saveDownload = useCallback((id: string) => {
+  const saveDownload = useCallback(async (id: string) => {
     const download = downloads.find(d => d.id === id);
-    if (download?.blob) {
-      const url = URL.createObjectURL(download.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = download.name;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+    if (!download?.blob) return;
+
+    // Try to save to folder first
+    if (downloadFolder) {
+      const saved = await saveToFolder(download.name, download.blob);
+      if (saved) {
+        updateDownload(id, { savedToFolder: true });
+        return;
+      }
     }
-  }, [downloads]);
+
+    // Fallback to browser download
+    const url = URL.createObjectURL(download.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = download.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [downloads, downloadFolder, saveToFolder, updateDownload]);
 
   const clearCompleted = useCallback(() => {
     setDownloads(prev => prev.filter(d => d.status !== 'completed'));
@@ -320,6 +407,13 @@ export function useDownloadManager() {
     saveDownload,
     clearCompleted,
     clearAll,
+    // Folder management
+    downloadFolder,
+    folderName,
+    selectDownloadFolder,
+    clearDownloadFolder,
+    autoSave,
+    setAutoSave,
   };
 }
 

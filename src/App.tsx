@@ -46,6 +46,11 @@ function App() {
     saveDownload,
     clearCompleted,
     clearAll,
+    folderName,
+    selectDownloadFolder,
+    clearDownloadFolder,
+    autoSave,
+    setAutoSave,
   } = useDownloadManager();
 
   // Count active downloads
@@ -385,6 +390,11 @@ function App() {
             onClearCompleted={clearCompleted}
             onClearAll={clearAll}
             onClose={() => setShowDownloadManager(false)}
+            folderName={folderName}
+            onSelectFolder={selectDownloadFolder}
+            onClearFolder={clearDownloadFolder}
+            autoSave={autoSave}
+            onAutoSaveChange={setAutoSave}
           />
         </>
       )}

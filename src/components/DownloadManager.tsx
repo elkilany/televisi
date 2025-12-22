@@ -14,6 +14,12 @@ interface DownloadManagerProps {
   onClearCompleted: () => void;
   onClearAll: () => void;
   onClose: () => void;
+  // Folder management
+  folderName: string | null;
+  onSelectFolder: () => void;
+  onClearFolder: () => void;
+  autoSave: boolean;
+  onAutoSaveChange: (enabled: boolean) => void;
 }
 
 function getStatusIcon(status: DownloadStatus) {
@@ -76,6 +82,11 @@ export function DownloadManager({
   onClearCompleted,
   onClearAll,
   onClose,
+  folderName,
+  onSelectFolder,
+  onClearFolder,
+  autoSave,
+  onAutoSaveChange,
 }: DownloadManagerProps) {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
 
@@ -104,6 +115,41 @@ export function DownloadManager({
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
+      </div>
+
+      {/* Folder Selection */}
+      <div className="download-manager__folder">
+        <div className="download-manager__folder-info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+          </svg>
+          {folderName ? (
+            <span className="download-manager__folder-name">{folderName}</span>
+          ) : (
+            <span className="download-manager__folder-none">No folder selected</span>
+          )}
+        </div>
+        <div className="download-manager__folder-actions">
+          {folderName ? (
+            <>
+              <label className="download-manager__autosave">
+                <input
+                  type="checkbox"
+                  checked={autoSave}
+                  onChange={(e) => onAutoSaveChange(e.target.checked)}
+                />
+                Auto-save
+              </label>
+              <button className="download-manager__folder-btn" onClick={onClearFolder}>
+                Clear
+              </button>
+            </>
+          ) : (
+            <button className="download-manager__folder-btn download-manager__folder-btn--primary" onClick={onSelectFolder}>
+              Select Folder
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="download-manager__filters">
@@ -145,6 +191,14 @@ export function DownloadManager({
               <div className="download-item__info">
                 <div className="download-item__name" title={download.name}>
                   {download.name}
+                  {download.savedToFolder && (
+                    <span className="download-item__saved" title="Saved to folder">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                        <polyline points="22,4 12,14.01 9,11.01" />
+                      </svg>
+                    </span>
+                  )}
                 </div>
 
                 <div className="download-item__details">
@@ -161,7 +215,10 @@ export function DownloadManager({
                   )}
 
                   {download.status === 'completed' && (
-                    <span>{formatBytes(download.size)}</span>
+                    <span>
+                      {formatBytes(download.size)}
+                      {download.savedToFolder && ' - Saved to folder'}
+                    </span>
                   )}
 
                   {download.status === 'paused' && (
@@ -177,7 +234,7 @@ export function DownloadManager({
                   )}
 
                   {download.status === 'pending' && (
-                    <span>Starting...</span>
+                    <span>Waiting...</span>
                   )}
                 </div>
 
@@ -230,7 +287,7 @@ export function DownloadManager({
                   </button>
                 )}
 
-                {download.status === 'completed' && (
+                {download.status === 'completed' && !download.savedToFolder && (
                   <button
                     className="download-item__btn download-item__btn--primary"
                     onClick={() => onSave(download.id)}
