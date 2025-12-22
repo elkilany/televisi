@@ -5,6 +5,7 @@ import { loadPlaylistFromUrl, loadPlaylistFromFile } from './utils/m3uParser';
 import { loadFullPlaylistFromXtream, loadSeriesEpisodes, saveXtreamCredentials, clearXtreamCredentials, loadXtreamCredentials } from './utils/xtreamApi';
 import { useDownloadManager } from './hooks/useDownloadManager';
 import { useDebounce } from './hooks/useDebounce';
+import { useKeepAlive } from './hooks/useKeepAlive';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelList } from './components/ChannelList';
 import { SearchBar } from './components/SearchBar';
@@ -17,6 +18,9 @@ const FAVORITES_KEY = 'televisi-favorites';
 const LAST_PLAYLIST_KEY = 'televisi-last-playlist';
 
 function App() {
+  // Keep session alive
+  useKeepAlive(30000); // Keep alive every 30 seconds
+
   // Content state
   const [fullPlaylist, setFullPlaylist] = useState<XtreamFullPlaylist | null>(null);
   const [m3uPlaylist, setM3uPlaylist] = useState<PlaylistInfo | null>(null);
