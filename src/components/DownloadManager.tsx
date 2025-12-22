@@ -21,8 +21,8 @@ interface DownloadManagerProps {
   autoSave: boolean;
   onAutoSaveChange: (enabled: boolean) => void;
   // Speed settings
-  throttleMs: number;
-  onThrottleMsChange: (value: number) => void;
+  speedLimitKBps: number;
+  onSpeedLimitChange: (value: number) => void;
   delayMs: number;
   onDelayMsChange: (value: number) => void;
 }
@@ -92,8 +92,8 @@ export function DownloadManager({
   onClearFolder,
   autoSave,
   onAutoSaveChange,
-  throttleMs,
-  onThrottleMsChange,
+  speedLimitKBps,
+  onSpeedLimitChange,
   delayMs,
   onDelayMsChange,
 }: DownloadManagerProps) {
@@ -164,25 +164,26 @@ export function DownloadManager({
       {/* Speed Settings */}
       <div className="download-manager__speed">
         <div className="download-manager__speed-item">
-          <label>Chunk delay (ms):</label>
+          <label>Speed limit (KB/s):</label>
           <input
             type="number"
             min="0"
-            max="5000"
-            step="100"
-            value={throttleMs}
-            onChange={(e) => onThrottleMsChange(Number(e.target.value))}
+            max="10000"
+            step="50"
+            value={speedLimitKBps}
+            onChange={(e) => onSpeedLimitChange(Number(e.target.value))}
+            placeholder="0 = unlimited"
           />
         </div>
         <div className="download-manager__speed-item">
-          <label>Delay between (ms):</label>
+          <label>Delay between (s):</label>
           <input
             type="number"
             min="0"
-            max="30000"
-            step="1000"
-            value={delayMs}
-            onChange={(e) => onDelayMsChange(Number(e.target.value))}
+            max="60"
+            step="1"
+            value={Math.round(delayMs / 1000)}
+            onChange={(e) => onDelayMsChange(Number(e.target.value) * 1000)}
           />
         </div>
       </div>

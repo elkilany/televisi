@@ -26,7 +26,7 @@ interface DownloadController {
 const STORAGE_KEY = 'televisi-downloads';
 const SETTINGS_KEY = 'televisi-download-settings';
 const DEFAULT_DELAY_MS = 5000; // 5 second delay between downloads
-const DEFAULT_THROTTLE_MS = 500; // 500ms throttle between chunk reads
+const DEFAULT_SPEED_LIMIT = 500; // 500 KB/s default speed limit (0 = unlimited)
 
 // File System Access API types
 declare global {
@@ -59,17 +59,17 @@ export function useDownloadManager() {
   const [autoSave, setAutoSave] = useState(true);
 
   // Speed settings (loaded from localStorage)
-  const [throttleMs, setThrottleMsState] = useState<number>(() => {
+  const [speedLimitKBps, setSpeedLimitState] = useState<number>(() => {
     const saved = localStorage.getItem(SETTINGS_KEY);
     if (saved) {
       try {
         const settings = JSON.parse(saved);
-        return settings.throttleMs ?? DEFAULT_THROTTLE_MS;
+        return settings.speedLimitKBps ?? DEFAULT_SPEED_LIMIT;
       } catch {
-        return DEFAULT_THROTTLE_MS;
+        return DEFAULT_SPEED_LIMIT;
       }
     }
-    return DEFAULT_THROTTLE_MS;
+    return DEFAULT_SPEED_LIMIT;
   });
 
   const [delayMs, setDelayMsState] = useState<number>(() => {
@@ -86,18 +86,18 @@ export function useDownloadManager() {
   });
 
   // Refs to hold current values for use in callbacks
-  const throttleMsRef = useRef(throttleMs);
+  const speedLimitRef = useRef(speedLimitKBps);
   const delayMsRef = useRef(delayMs);
 
   // Update refs when state changes
   useEffect(() => {
-    throttleMsRef.current = throttleMs;
+    speedLimitRef.current = speedLimitKBps;
     delayMsRef.current = delayMs;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ throttleMs, delayMs }));
-  }, [throttleMs, delayMs]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ speedLimitKBps, delayMs }));
+  }, [speedLimitKBps, delayMs]);
 
-  const setThrottleMs = useCallback((value: number) => {
-    setThrottleMsState(Math.max(0, value));
+  const setSpeedLimit = useCallback((value: number) => {
+    setSpeedLimitState(Math.max(0, value));
   }, []);
 
   const setDelayMs = useCallback((value: number) => {
@@ -308,8 +308,13 @@ export function useDownloadManager() {
         }
 
         // Throttle download speed to respect server limits
-        if (throttleMsRef.current > 0) {
-          await new Promise(resolve => setTimeout(resolve, throttleMsRef.current));
+        // Calculate delay based on chunk size and speed limit (KB/s)
+        if (speedLimitRef.current > 0) {
+          const targetBytesPerSecond = speedLimitRef.current * 1024;
+          const delayMs = (value.length / targetBytesPerSecond) * 1000;
+          if (delayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+          }
         }
       }
 
@@ -577,8 +582,8 @@ export function useDownloadManager() {
     autoSave,
     setAutoSave,
     // Speed settings
-    throttleMs,
-    setThrottleMs,
+    speedLimitKBps,
+    setSpeedLimit,
     delayMs,
     setDelayMs,
   };

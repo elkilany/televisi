@@ -57,8 +57,8 @@ function App() {
     clearDownloadFolder,
     autoSave,
     setAutoSave,
-    throttleMs,
-    setThrottleMs,
+    speedLimitKBps,
+    setSpeedLimit,
     delayMs,
     setDelayMs,
   } = useDownloadManager();
@@ -420,8 +420,8 @@ function App() {
             onClearFolder={clearDownloadFolder}
             autoSave={autoSave}
             onAutoSaveChange={setAutoSave}
-            throttleMs={throttleMs}
-            onThrottleMsChange={setThrottleMs}
+            speedLimitKBps={speedLimitKBps}
+            onSpeedLimitChange={setSpeedLimit}
             delayMs={delayMs}
             onDelayMsChange={setDelayMs}
           />
