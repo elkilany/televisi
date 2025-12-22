@@ -43,6 +43,7 @@ function App() {
     downloads,
     addDownload,
     addMultipleDownloads,
+    startQueue,
     pauseDownload,
     resumeDownload,
     cancelDownload,
@@ -258,8 +259,9 @@ function App() {
 
   const handleDownload = useCallback((name: string, url: string) => {
     addDownload(name, url);
+    startQueue(); // Start processing the queue
     setShowDownloadManager(true);
-  }, [addDownload]);
+  }, [addDownload, startQueue]);
 
   const handleDownloadAll = useCallback((channels: Channel[]) => {
     const items = channels.map(channel => ({
@@ -269,9 +271,10 @@ function App() {
 
     if (items.length > 0) {
       addMultipleDownloads(items);
+      startQueue(); // Start processing the queue
       setShowDownloadManager(true);
     }
-  }, [addMultipleDownloads]);
+  }, [addMultipleDownloads, startQueue]);
 
   // Show playlist loader if no content loaded
   if (!hasContent) {

@@ -142,18 +142,8 @@ export function useDownloadManager() {
       savedToFolder: false,
     };
 
-    // Check if we should start immediately (no active download)
-    const shouldStartNow = !isProcessingRef.current;
-
-    if (shouldStartNow && startDownloadRef.current) {
-      isProcessingRef.current = true;
-      newDownload.status = 'downloading';
-      setDownloads(prev => [newDownload, ...prev]);
-      startDownloadRef.current(id, url);
-    } else {
-      // Just add to queue, don't start
-      setDownloads(prev => [newDownload, ...prev]);
-    }
+    // Just add to queue statically - no server requests
+    setDownloads(prev => [newDownload, ...prev]);
 
     return id;
   }, []);
@@ -163,8 +153,8 @@ export function useDownloadManager() {
     if (items.length === 0) return [];
 
     const timestamp = Date.now();
-    const shouldStartFirst = !isProcessingRef.current;
 
+    // All items are added as pending - no server requests
     const newDownloads: DownloadItem[] = items.map((item, index) => ({
       id: `download-${timestamp}-${index}-${Math.random().toString(36).substr(2, 9)}`,
       name: item.name,
@@ -172,22 +162,40 @@ export function useDownloadManager() {
       size: 0,
       downloaded: 0,
       progress: 0,
-      // Only first item starts if nothing is processing
-      status: (shouldStartFirst && index === 0) ? 'downloading' as DownloadStatus : 'pending' as DownloadStatus,
+      status: 'pending' as DownloadStatus,
       startedAt: timestamp,
       speed: 0,
       savedToFolder: false,
     }));
 
+    // Just add to queue statically - no server requests
     setDownloads(prev => [...newDownloads, ...prev]);
 
-    // Start first download if nothing is processing
-    if (shouldStartFirst && newDownloads.length > 0 && startDownloadRef.current) {
-      isProcessingRef.current = true;
-      startDownloadRef.current(newDownloads[0].id, newDownloads[0].url);
-    }
-
     return newDownloads.map(d => d.id);
+  }, []);
+
+  // Start processing the queue - call this to begin downloads
+  const startQueue = useCallback(() => {
+    if (isProcessingRef.current) return; // Already processing
+
+    setDownloads(prev => {
+      const nextPending = prev.find(d => d.status === 'pending');
+      if (!nextPending) return prev;
+
+      isProcessingRef.current = true;
+
+      const pendingId = nextPending.id;
+      const pendingUrl = nextPending.url;
+      setTimeout(() => {
+        if (startDownloadRef.current) {
+          startDownloadRef.current(pendingId, pendingUrl);
+        }
+      }, 0);
+
+      return prev.map(d =>
+        d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+      );
+    });
   }, []);
 
   const startDownload = useCallback(async (id: string, url: string) => {
@@ -500,6 +508,7 @@ export function useDownloadManager() {
     downloads,
     addDownload,
     addMultipleDownloads,
+    startQueue,
     pauseDownload,
     resumeDownload,
     cancelDownload,
