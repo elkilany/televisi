@@ -152,6 +152,43 @@
   color: #22c55e;
 }
 
+/* Speed Settings */
+.download-manager__speed {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.download-manager__speed-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.download-manager__speed-item label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+.download-manager__speed-item input {
+  width: 80px;
+  padding: 0.25rem 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #f1f5f9;
+  font-size: 0.8rem;
+}
+
+.download-manager__speed-item input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
 .download-manager__filters {
   display: flex;
   gap: 0.5rem;

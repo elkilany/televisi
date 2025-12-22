@@ -20,6 +20,11 @@ interface DownloadManagerProps {
   onClearFolder: () => void;
   autoSave: boolean;
   onAutoSaveChange: (enabled: boolean) => void;
+  // Speed settings
+  throttleMs: number;
+  onThrottleMsChange: (value: number) => void;
+  delayMs: number;
+  onDelayMsChange: (value: number) => void;
 }
 
 function getStatusIcon(status: DownloadStatus) {
@@ -87,6 +92,10 @@ export function DownloadManager({
   onClearFolder,
   autoSave,
   onAutoSaveChange,
+  throttleMs,
+  onThrottleMsChange,
+  delayMs,
+  onDelayMsChange,
 }: DownloadManagerProps) {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
 
@@ -149,6 +158,32 @@ export function DownloadManager({
               Select Folder
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Speed Settings */}
+      <div className="download-manager__speed">
+        <div className="download-manager__speed-item">
+          <label>Chunk delay (ms):</label>
+          <input
+            type="number"
+            min="0"
+            max="5000"
+            step="100"
+            value={throttleMs}
+            onChange={(e) => onThrottleMsChange(Number(e.target.value))}
+          />
+        </div>
+        <div className="download-manager__speed-item">
+          <label>Delay between (ms):</label>
+          <input
+            type="number"
+            min="0"
+            max="30000"
+            step="1000"
+            value={delayMs}
+            onChange={(e) => onDelayMsChange(Number(e.target.value))}
+          />
         </div>
       </div>
 

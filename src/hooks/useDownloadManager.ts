@@ -24,8 +24,9 @@ interface DownloadController {
 }
 
 const STORAGE_KEY = 'televisi-downloads';
-const DOWNLOAD_DELAY_MS = 5000; // 5 second delay between downloads
-const CHUNK_THROTTLE_MS = 500; // 500ms throttle between chunk reads to limit download speed
+const SETTINGS_KEY = 'televisi-download-settings';
+const DEFAULT_DELAY_MS = 5000; // 5 second delay between downloads
+const DEFAULT_THROTTLE_MS = 500; // 500ms throttle between chunk reads
 
 // File System Access API types
 declare global {
@@ -56,6 +57,52 @@ export function useDownloadManager() {
   const [downloadFolder, setDownloadFolder] = useState<FileSystemDirectoryHandle | null>(null);
   const [folderName, setFolderName] = useState<string | null>(null);
   const [autoSave, setAutoSave] = useState(true);
+
+  // Speed settings (loaded from localStorage)
+  const [throttleMs, setThrottleMsState] = useState<number>(() => {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      try {
+        const settings = JSON.parse(saved);
+        return settings.throttleMs ?? DEFAULT_THROTTLE_MS;
+      } catch {
+        return DEFAULT_THROTTLE_MS;
+      }
+    }
+    return DEFAULT_THROTTLE_MS;
+  });
+
+  const [delayMs, setDelayMsState] = useState<number>(() => {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      try {
+        const settings = JSON.parse(saved);
+        return settings.delayMs ?? DEFAULT_DELAY_MS;
+      } catch {
+        return DEFAULT_DELAY_MS;
+      }
+    }
+    return DEFAULT_DELAY_MS;
+  });
+
+  // Refs to hold current values for use in callbacks
+  const throttleMsRef = useRef(throttleMs);
+  const delayMsRef = useRef(delayMs);
+
+  // Update refs when state changes
+  useEffect(() => {
+    throttleMsRef.current = throttleMs;
+    delayMsRef.current = delayMs;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ throttleMs, delayMs }));
+  }, [throttleMs, delayMs]);
+
+  const setThrottleMs = useCallback((value: number) => {
+    setThrottleMsState(Math.max(0, value));
+  }, []);
+
+  const setDelayMs = useCallback((value: number) => {
+    setDelayMsState(Math.max(0, value));
+  }, []);
 
   const controllersRef = useRef<Map<string, DownloadController>>(new Map());
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
@@ -261,7 +308,9 @@ export function useDownloadManager() {
         }
 
         // Throttle download speed to respect server limits
-        await new Promise(resolve => setTimeout(resolve, CHUNK_THROTTLE_MS));
+        if (throttleMsRef.current > 0) {
+          await new Promise(resolve => setTimeout(resolve, throttleMsRef.current));
+        }
       }
 
       // Combine chunks into blob
@@ -478,7 +527,7 @@ export function useDownloadManager() {
   // Schedule next download after cooldown - called when a download completes
   const scheduleNextDownload = useCallback(() => {
     const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
-    const cooldownRemaining = DOWNLOAD_DELAY_MS - timeSinceLastDownload;
+    const cooldownRemaining = delayMsRef.current - timeSinceLastDownload;
 
     if (cooldownRemaining > 0) {
       setTimeout(() => {
@@ -527,6 +576,11 @@ export function useDownloadManager() {
     clearDownloadFolder,
     autoSave,
     setAutoSave,
+    // Speed settings
+    throttleMs,
+    setThrottleMs,
+    delayMs,
+    setDelayMs,
   };
 }
 

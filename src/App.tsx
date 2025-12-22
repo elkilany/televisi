@@ -57,6 +57,10 @@ function App() {
     clearDownloadFolder,
     autoSave,
     setAutoSave,
+    throttleMs,
+    setThrottleMs,
+    delayMs,
+    setDelayMs,
   } = useDownloadManager();
 
   // Count active downloads
@@ -416,6 +420,10 @@ function App() {
             onClearFolder={clearDownloadFolder}
             autoSave={autoSave}
             onAutoSaveChange={setAutoSave}
+            throttleMs={throttleMs}
+            onThrottleMsChange={setThrottleMs}
+            delayMs={delayMs}
+            onDelayMsChange={setDelayMs}
           />
         </>
       )}
