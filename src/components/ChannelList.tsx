@@ -11,6 +11,7 @@ interface ChannelListProps {
   favorites: Set<string>;
   onSelectChannel: (channel: Channel) => void;
   onToggleFavorite: (channel: Channel) => void;
+  onDownloadAll?: (channels: Channel[]) => void;
   searchQuery: string;
 }
 
@@ -62,6 +63,7 @@ export function ChannelList({
   favorites,
   onSelectChannel,
   onToggleFavorite,
+  onDownloadAll,
   searchQuery,
 }: ChannelListProps) {
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
@@ -91,6 +93,15 @@ export function ChannelList({
 
     return result;
   }, [channels, searchQuery, filterMode, selectedGroup, favorites]);
+
+  // Get downloadable channels (movies and series episodes with URLs)
+  const downloadableChannels = useMemo(() => {
+    return filteredChannels.filter(
+      (channel) =>
+        (channel.contentType === 'movies' || channel.contentType === 'series') &&
+        (channel.downloadUrl || channel.url)
+    );
+  }, [filteredChannels]);
 
   // Measure container height
   const containerRef = useCallback((node: HTMLDivElement | null) => {
@@ -151,8 +162,22 @@ export function ChannelList({
         </select>
       </div>
 
-      <div className="channel-list__count">
-        {filteredChannels.length} channel{filteredChannels.length !== 1 ? 's' : ''}
+      <div className="channel-list__count-row">
+        <div className="channel-list__count">
+          {filteredChannels.length} channel{filteredChannels.length !== 1 ? 's' : ''}
+        </div>
+        {onDownloadAll && downloadableChannels.length > 0 && (
+          <button
+            className="channel-list__download-all"
+            onClick={() => onDownloadAll(downloadableChannels)}
+            title={`Download all ${downloadableChannels.length} items`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Download All ({downloadableChannels.length})
+          </button>
+        )}
       </div>
 
       <div className="channel-list__items" ref={containerRef}>

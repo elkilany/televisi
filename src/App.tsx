@@ -38,6 +38,7 @@ function App() {
   const {
     downloads,
     addDownload,
+    addMultipleDownloads,
     pauseDownload,
     resumeDownload,
     cancelDownload,
@@ -256,6 +257,18 @@ function App() {
     setShowDownloadManager(true);
   }, [addDownload]);
 
+  const handleDownloadAll = useCallback((channels: Channel[]) => {
+    const items = channels.map(channel => ({
+      name: `${channel.name}${channel.containerExtension ? `.${channel.containerExtension}` : ''}`,
+      url: channel.downloadUrl || channel.url,
+    }));
+
+    if (items.length > 0) {
+      addMultipleDownloads(items);
+      setShowDownloadManager(true);
+    }
+  }, [addMultipleDownloads]);
+
   // Show playlist loader if no content loaded
   if (!hasContent) {
     return (
@@ -353,6 +366,7 @@ function App() {
               favorites={favorites}
               onSelectChannel={handleSelectChannel}
               onToggleFavorite={handleToggleFavorite}
+              onDownloadAll={handleDownloadAll}
               searchQuery={debouncedSearchQuery}
             />
 

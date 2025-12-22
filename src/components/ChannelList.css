@@ -51,10 +51,42 @@
   border-color: rgba(99, 102, 241, 0.5);
 }
 
-.channel-list__count {
+.channel-list__count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.channel-list__count {
   font-size: 0.8rem;
   color: #64748b;
+}
+
+.channel-list__download-all {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  color: #a5b4fc;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.channel-list__download-all:hover {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #c4b5fd;
+}
+
+.channel-list__download-all svg {
+  flex-shrink: 0;
 }
 
 .channel-list__items {

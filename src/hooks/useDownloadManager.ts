@@ -145,6 +145,28 @@ export function useDownloadManager() {
     return id;
   }, []);
 
+  // Add multiple downloads at once (for downloading entire folders/groups)
+  const addMultipleDownloads = useCallback((items: { name: string; url: string }[]): string[] => {
+    const timestamp = Date.now();
+    const newDownloads: DownloadItem[] = items.map((item, index) => ({
+      id: `download-${timestamp}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+      name: item.name,
+      url: item.url,
+      size: 0,
+      downloaded: 0,
+      progress: 0,
+      status: 'pending' as DownloadStatus,
+      startedAt: timestamp,
+      speed: 0,
+      savedToFolder: false,
+    }));
+
+    setDownloads(prev => [...newDownloads, ...prev]);
+
+    // Return all IDs
+    return newDownloads.map(d => d.id);
+  }, []);
+
   const startDownload = useCallback(async (id: string, url: string) => {
     const abortController = new AbortController();
 
@@ -399,6 +421,7 @@ export function useDownloadManager() {
   return {
     downloads,
     addDownload,
+    addMultipleDownloads,
     pauseDownload,
     resumeDownload,
     cancelDownload,
