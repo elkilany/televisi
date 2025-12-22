@@ -265,11 +265,25 @@ export function useDownloadManager() {
       lastDownloadCompletedRef.current = Date.now(); // Track completion time for cooldown
 
     } catch (error) {
+      controllersRef.current.delete(id);
+      speedTrackersRef.current.delete(id);
+
       if (error instanceof Error && error.name === 'AbortError') {
-        // Check if it was paused or cancelled
+        // Check current status using functional update to get fresh state
         setDownloads(prev => {
           const download = prev.find(d => d.id === id);
-          if (download?.status !== 'paused' && download?.status !== 'cancelled') {
+
+          // If paused, keep processing ref true so next download waits
+          if (download?.status === 'paused') {
+            // Don't reset isProcessingRef - user paused, so wait
+            return prev;
+          }
+
+          // If cancelled or unknown, reset processing ref and allow next
+          isProcessingRef.current = false;
+          lastDownloadCompletedRef.current = Date.now();
+
+          if (download?.status !== 'cancelled') {
             return prev.map(d => d.id === id ? { ...d, status: 'cancelled' as DownloadStatus } : d);
           }
           return prev;
@@ -279,10 +293,9 @@ export function useDownloadManager() {
           status: 'failed',
           error: error instanceof Error ? error.message : 'Download failed',
         });
+        isProcessingRef.current = false;
+        lastDownloadCompletedRef.current = Date.now();
       }
-      controllersRef.current.delete(id);
-      speedTrackersRef.current.delete(id);
-      isProcessingRef.current = false;
     }
   }, [updateDownload, downloadFolder, autoSave, saveToFolder]);
 
@@ -391,14 +404,22 @@ export function useDownloadManager() {
 
   // Sequential queue processor - start next pending download when no download is active
   useEffect(() => {
-    // Prevent multiple simultaneous processing
-    if (isProcessingRef.current) return;
+    // CRITICAL: Check ref first to prevent race conditions
+    // This ref is the single source of truth for whether a download is in progress
+    if (isProcessingRef.current) {
+      return;
+    }
 
+    // Double-check with state as well
     const hasActiveDownload = downloads.some(d => d.status === 'downloading');
-    if (hasActiveDownload) return;
+    if (hasActiveDownload) {
+      return;
+    }
 
     const nextPending = downloads.find(d => d.status === 'pending');
-    if (!nextPending) return;
+    if (!nextPending) {
+      return;
+    }
 
     // Check cooldown
     const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
@@ -414,17 +435,21 @@ export function useDownloadManager() {
       return () => clearTimeout(timeout);
     }
 
-    // Mark as processing to prevent race conditions
+    // CRITICAL: Set ref IMMEDIATELY and SYNCHRONOUSLY before any async operation
     isProcessingRef.current = true;
 
-    // Update status and start download
+    // Now safe to update state and start download
+    const downloadId = nextPending.id;
+    const downloadUrl = nextPending.url;
+
     setDownloads(prev =>
       prev.map(d =>
-        d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+        d.id === downloadId ? { ...d, status: 'downloading' as DownloadStatus } : d
       )
     );
 
-    startDownload(nextPending.id, nextPending.url);
+    // Start the download
+    startDownload(downloadId, downloadUrl);
   }, [downloads, startDownload]);
 
   // Cleanup on unmount
