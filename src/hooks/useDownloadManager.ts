@@ -26,7 +26,8 @@ interface DownloadController {
 const STORAGE_KEY = 'televisi-downloads';
 const SETTINGS_KEY = 'televisi-download-settings';
 const DEFAULT_DELAY_MS = 5000; // 5 second delay between downloads
-const DEFAULT_SPEED_LIMIT = 500; // 500 KB/s default speed limit (0 = unlimited)
+const DEFAULT_SPEED_LIMIT = 200; // 200 KB/s default speed limit (0 = unlimited)
+const MIN_CHUNK_DELAY_MS = 50; // Minimum delay between chunk reads to avoid overwhelming server
 
 // File System Access API types
 declare global {
@@ -308,14 +309,17 @@ export function useDownloadManager() {
         }
 
         // Throttle download speed to respect server limits
-        // Calculate delay based on chunk size and speed limit (KB/s)
+        // Always apply minimum delay between chunks to avoid overwhelming server
+        // Then add speed-based delay if speed limit is set
+        let chunkDelay = MIN_CHUNK_DELAY_MS;
+
         if (speedLimitRef.current > 0) {
           const targetBytesPerSecond = speedLimitRef.current * 1024;
-          const delayMs = (value.length / targetBytesPerSecond) * 1000;
-          if (delayMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-          }
+          const speedBasedDelay = (value.length / targetBytesPerSecond) * 1000;
+          chunkDelay = Math.max(chunkDelay, speedBasedDelay);
         }
+
+        await new Promise(resolve => setTimeout(resolve, chunkDelay));
       }
 
       // Combine chunks into blob
