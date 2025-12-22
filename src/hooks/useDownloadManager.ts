@@ -60,6 +60,8 @@ export function useDownloadManager() {
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
   const isProcessingRef = useRef(false);
   const lastDownloadCompletedRef = useRef<number>(0); // Track when the last download completed
+  const scheduleNextRef = useRef<(() => void) | null>(null); // Ref to hold schedule function
+  const startDownloadRef = useRef<((id: string, url: string) => void) | null>(null); // Ref to hold startDownload
 
   // Save completed downloads to localStorage
   useEffect(() => {
@@ -140,16 +142,29 @@ export function useDownloadManager() {
       savedToFolder: false,
     };
 
-    setDownloads(prev => [newDownload, ...prev]);
+    // Check if we should start immediately (no active download)
+    const shouldStartNow = !isProcessingRef.current;
 
-    // Don't start immediately - the queue processor will handle it
+    if (shouldStartNow && startDownloadRef.current) {
+      isProcessingRef.current = true;
+      newDownload.status = 'downloading';
+      setDownloads(prev => [newDownload, ...prev]);
+      startDownloadRef.current(id, url);
+    } else {
+      // Just add to queue, don't start
+      setDownloads(prev => [newDownload, ...prev]);
+    }
 
     return id;
   }, []);
 
   // Add multiple downloads at once (for downloading entire folders/groups)
   const addMultipleDownloads = useCallback((items: { name: string; url: string }[]): string[] => {
+    if (items.length === 0) return [];
+
     const timestamp = Date.now();
+    const shouldStartFirst = !isProcessingRef.current;
+
     const newDownloads: DownloadItem[] = items.map((item, index) => ({
       id: `download-${timestamp}-${index}-${Math.random().toString(36).substr(2, 9)}`,
       name: item.name,
@@ -157,7 +172,8 @@ export function useDownloadManager() {
       size: 0,
       downloaded: 0,
       progress: 0,
-      status: 'pending' as DownloadStatus,
+      // Only first item starts if nothing is processing
+      status: (shouldStartFirst && index === 0) ? 'downloading' as DownloadStatus : 'pending' as DownloadStatus,
       startedAt: timestamp,
       speed: 0,
       savedToFolder: false,
@@ -165,7 +181,12 @@ export function useDownloadManager() {
 
     setDownloads(prev => [...newDownloads, ...prev]);
 
-    // Return all IDs
+    // Start first download if nothing is processing
+    if (shouldStartFirst && newDownloads.length > 0 && startDownloadRef.current) {
+      isProcessingRef.current = true;
+      startDownloadRef.current(newDownloads[0].id, newDownloads[0].url);
+    }
+
     return newDownloads.map(d => d.id);
   }, []);
 
@@ -262,7 +283,12 @@ export function useDownloadManager() {
       controllersRef.current.delete(id);
       speedTrackersRef.current.delete(id);
       isProcessingRef.current = false;
-      lastDownloadCompletedRef.current = Date.now(); // Track completion time for cooldown
+      lastDownloadCompletedRef.current = Date.now();
+
+      // Schedule next download after cooldown
+      if (scheduleNextRef.current) {
+        scheduleNextRef.current();
+      }
 
     } catch (error) {
       controllersRef.current.delete(id);
@@ -283,6 +309,11 @@ export function useDownloadManager() {
           isProcessingRef.current = false;
           lastDownloadCompletedRef.current = Date.now();
 
+          // Schedule next download
+          if (scheduleNextRef.current) {
+            scheduleNextRef.current();
+          }
+
           if (download?.status !== 'cancelled') {
             return prev.map(d => d.id === id ? { ...d, status: 'cancelled' as DownloadStatus } : d);
           }
@@ -295,6 +326,11 @@ export function useDownloadManager() {
         });
         isProcessingRef.current = false;
         lastDownloadCompletedRef.current = Date.now();
+
+        // Schedule next download
+        if (scheduleNextRef.current) {
+          scheduleNextRef.current();
+        }
       }
     }
   }, [updateDownload, downloadFolder, autoSave, saveToFolder]);
@@ -402,55 +438,54 @@ export function useDownloadManager() {
     setDownloads([]);
   }, []);
 
-  // Sequential queue processor - start next pending download when no download is active
-  useEffect(() => {
-    // CRITICAL: Check ref first to prevent race conditions
-    // This ref is the single source of truth for whether a download is in progress
-    if (isProcessingRef.current) {
-      return;
-    }
+  // Process next download in queue - called only after a download completes
+  const processNextInQueue = useCallback(() => {
+    setDownloads(prev => {
+      const nextPending = prev.find(d => d.status === 'pending');
+      if (!nextPending) {
+        return prev;
+      }
 
-    // Double-check with state as well
-    const hasActiveDownload = downloads.some(d => d.status === 'downloading');
-    if (hasActiveDownload) {
-      return;
-    }
+      // Mark as downloading and start
+      isProcessingRef.current = true;
 
-    const nextPending = downloads.find(d => d.status === 'pending');
-    if (!nextPending) {
-      return;
-    }
+      // Schedule the actual download start after state update
+      const pendingId = nextPending.id;
+      const pendingUrl = nextPending.url;
+      setTimeout(() => {
+        if (startDownloadRef.current) {
+          startDownloadRef.current(pendingId, pendingUrl);
+        }
+      }, 0);
 
-    // Check cooldown
+      return prev.map(d =>
+        d.id === nextPending.id ? { ...d, status: 'downloading' as DownloadStatus } : d
+      );
+    });
+  }, []);
+
+  // Schedule next download after cooldown - called when a download completes
+  const scheduleNextDownload = useCallback(() => {
     const timeSinceLastDownload = Date.now() - lastDownloadCompletedRef.current;
     const cooldownRemaining = DOWNLOAD_DELAY_MS - timeSinceLastDownload;
 
-    if (cooldownRemaining > 0 && lastDownloadCompletedRef.current > 0) {
-      // Wait for cooldown
-      const timeout = setTimeout(() => {
-        // Trigger re-evaluation
-        setDownloads(prev => [...prev]);
-      }, cooldownRemaining + 100);
-
-      return () => clearTimeout(timeout);
+    if (cooldownRemaining > 0) {
+      setTimeout(() => {
+        processNextInQueue();
+      }, cooldownRemaining);
+    } else {
+      processNextInQueue();
     }
+  }, [processNextInQueue]);
 
-    // CRITICAL: Set ref IMMEDIATELY and SYNCHRONOUSLY before any async operation
-    isProcessingRef.current = true;
+  // Keep the refs updated with the latest functions
+  useEffect(() => {
+    scheduleNextRef.current = scheduleNextDownload;
+  }, [scheduleNextDownload]);
 
-    // Now safe to update state and start download
-    const downloadId = nextPending.id;
-    const downloadUrl = nextPending.url;
-
-    setDownloads(prev =>
-      prev.map(d =>
-        d.id === downloadId ? { ...d, status: 'downloading' as DownloadStatus } : d
-      )
-    );
-
-    // Start the download
-    startDownload(downloadId, downloadUrl);
-  }, [downloads, startDownload]);
+  useEffect(() => {
+    startDownloadRef.current = startDownload;
+  }, [startDownload]);
 
   // Cleanup on unmount
   useEffect(() => {
