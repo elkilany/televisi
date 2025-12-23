@@ -30,8 +30,8 @@ const DEFAULT_DELAY_MS = 5000; // 5 second delay between downloads
 const DEFAULT_SPEED_LIMIT = 500; // 500 KB/s default speed limit (0 = unlimited)
 const MIN_CHUNK_DELAY_MS = 10; // Small minimum delay between chunk reads
 const FETCH_TIMEOUT_MS = 30000; // 30 second timeout for initial connection
-const MAX_RETRIES = 3; // Number of retry attempts for failed downloads
-const RETRY_DELAY_MS = 2000; // Initial delay before retry (doubles each attempt)
+const MAX_RETRIES = 5; // Number of retry attempts for failed downloads
+const RETRY_DELAY_MS = 3000; // Initial delay before retry (doubles each attempt)
 
 // File System Access API types
 declare global {
@@ -287,6 +287,10 @@ export function useDownloadManager() {
         if (error instanceof TypeError) return true;
         // Retry timeout errors
         if (error.name === 'TimeoutError') return true;
+        // Retry connection lost errors (stream read failures)
+        if (error.message.includes('Connection lost')) return true;
+        // Retry read timeout errors (stalled connections)
+        if (error.message.includes('Read timeout')) return true;
         // Retry server errors (5xx)
         if (error.message.includes('HTTP 5')) return true;
         // Retry "too many requests"
@@ -361,16 +365,42 @@ export function useDownloadManager() {
       let downloadedBytes = 0;
       let consecutiveSlowReads = 0;
       const SLOW_READ_THRESHOLD_MS = 5000; // Consider a read slow if it takes > 5s
+      const READ_TIMEOUT_MS = 60000; // 60 second timeout for each read operation
+
+      // Helper to format bytes for logging
+      const formatProgress = (bytes: number, total: number): string => {
+        const mb = (bytes / (1024 * 1024)).toFixed(2);
+        if (total > 0) {
+          const totalMb = (total / (1024 * 1024)).toFixed(2);
+          const percent = ((bytes / total) * 100).toFixed(1);
+          return `${mb}MB / ${totalMb}MB (${percent}%)`;
+        }
+        return `${mb}MB`;
+      };
 
       while (true) {
         const readStartTime = Date.now();
         let readResult: ReadableStreamReadResult<Uint8Array>;
 
         try {
-          readResult = await reader.read();
+          // Add read timeout to detect stalled connections
+          const readPromise = reader.read();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error(`Read timeout - connection stalled at ${formatProgress(downloadedBytes, totalSize)}`));
+            }, READ_TIMEOUT_MS);
+          });
+
+          readResult = await Promise.race([readPromise, timeoutPromise]);
         } catch (readError) {
-          // Handle stream read errors (connection dropped, etc.)
-          throw new Error('Connection lost while downloading');
+          // Handle stream read errors (connection dropped, stalled, etc.)
+          const progress = formatProgress(downloadedBytes, totalSize);
+          if (readError instanceof Error && readError.message.includes('Read timeout')) {
+            console.error(`Download stalled at ${progress}`);
+            throw readError;
+          }
+          console.error(`Connection lost at ${progress}:`, readError);
+          throw new Error(`Connection lost while downloading (at ${progress})`);
         }
 
         const { done, value } = readResult;
@@ -386,7 +416,7 @@ export function useDownloadManager() {
           consecutiveSlowReads++;
           if (consecutiveSlowReads >= 3) {
             // Connection is very slow, might be failing
-            console.warn('Download connection is very slow, may be unstable');
+            console.warn(`Download connection slow at ${formatProgress(downloadedBytes, totalSize)}`);
           }
         } else {
           consecutiveSlowReads = 0;
