@@ -657,6 +657,9 @@ export function useDownloadManager() {
           retryCount: currentRetryCount + 1,
         });
 
+        // Clear active download so retry can proceed
+        activeDownloadIdRef.current = null;
+
         // Schedule retry
         setTimeout(() => {
           // Check if download was cancelled while waiting for retry
@@ -671,6 +674,7 @@ export function useDownloadManager() {
             } else {
               // Download was cancelled or status changed, don't retry
               downloadLogger.info(`Retry cancelled - download status changed`, { downloadName });
+              activeDownloadIdRef.current = null;
               isProcessingRef.current = false;
               if (scheduleNextRef.current) {
                 scheduleNextRef.current();
