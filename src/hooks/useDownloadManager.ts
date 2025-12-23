@@ -16,6 +16,7 @@ export interface DownloadItem {
   speed: number; // bytes per second
   blob?: Blob;
   savedToFolder?: boolean;
+  retryCount: number; // Number of retry attempts made
 }
 
 interface DownloadController {
@@ -26,8 +27,11 @@ interface DownloadController {
 const STORAGE_KEY = 'televisi-downloads';
 const SETTINGS_KEY = 'televisi-download-settings';
 const DEFAULT_DELAY_MS = 5000; // 5 second delay between downloads
-const DEFAULT_SPEED_LIMIT = 200; // 200 KB/s default speed limit (0 = unlimited)
-const MIN_CHUNK_DELAY_MS = 50; // Minimum delay between chunk reads to avoid overwhelming server
+const DEFAULT_SPEED_LIMIT = 500; // 500 KB/s default speed limit (0 = unlimited)
+const MIN_CHUNK_DELAY_MS = 10; // Small minimum delay between chunk reads
+const FETCH_TIMEOUT_MS = 30000; // 30 second timeout for initial connection
+const MAX_RETRIES = 3; // Number of retry attempts for failed downloads
+const RETRY_DELAY_MS = 2000; // Initial delay before retry (doubles each attempt)
 
 // File System Access API types
 declare global {
@@ -47,6 +51,7 @@ export function useDownloadManager() {
         return parsed.filter((d: DownloadItem) => d.status === 'completed').map((d: DownloadItem) => ({
           ...d,
           blob: undefined, // Blobs can't be serialized
+          retryCount: d.retryCount ?? 0, // Backwards compatibility
         }));
       } catch {
         return [];
@@ -189,6 +194,7 @@ export function useDownloadManager() {
       startedAt: Date.now(),
       speed: 0,
       savedToFolder: false,
+      retryCount: 0,
     };
 
     // Just add to queue statically - no server requests
@@ -215,6 +221,7 @@ export function useDownloadManager() {
       startedAt: timestamp,
       speed: 0,
       savedToFolder: false,
+      retryCount: 0,
     }));
 
     // Just add to queue statically - no server requests
@@ -250,21 +257,97 @@ export function useDownloadManager() {
   const startDownload = useCallback(async (id: string, url: string) => {
     const abortController = new AbortController();
 
+    // Helper to get a user-friendly error message
+    const getErrorMessage = (error: unknown): string => {
+      if (error instanceof TypeError) {
+        // Network errors typically manifest as TypeError in fetch
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          return 'Network error - check your internet connection';
+        }
+        if (error.message.includes('CORS')) {
+          return 'Server blocked request (CORS error)';
+        }
+        return `Network error: ${error.message}`;
+      }
+      if (error instanceof Error) {
+        if (error.name === 'TimeoutError') {
+          return 'Connection timed out - server not responding';
+        }
+        return error.message;
+      }
+      return 'Download failed - unknown error';
+    };
+
+    // Helper to check if error is retryable
+    const isRetryableError = (error: unknown): boolean => {
+      if (error instanceof Error) {
+        // Don't retry user-initiated aborts
+        if (error.name === 'AbortError') return false;
+        // Retry network errors
+        if (error instanceof TypeError) return true;
+        // Retry timeout errors
+        if (error.name === 'TimeoutError') return true;
+        // Retry server errors (5xx)
+        if (error.message.includes('HTTP 5')) return true;
+        // Retry "too many requests"
+        if (error.message.includes('HTTP 429')) return true;
+      }
+      return false;
+    };
+
+    // Get current retry count
+    let currentRetryCount = 0;
+    setDownloads(prev => {
+      const download = prev.find(d => d.id === id);
+      if (download) {
+        currentRetryCount = download.retryCount;
+      }
+      return prev;
+    });
+
     try {
       // Status is already set to 'downloading' by the queue processor
 
-      const response = await fetch(url, {
-        signal: abortController.signal,
-      });
+      // Create a timeout for the fetch request
+      const timeoutId = setTimeout(() => {
+        abortController.abort();
+      }, FETCH_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          signal: abortController.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        // Check if it was a timeout
+        if (abortController.signal.aborted) {
+          const timeoutError = new Error('Connection timed out - server not responding');
+          timeoutError.name = 'TimeoutError';
+          throw timeoutError;
+        }
+        throw fetchError;
+      }
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const statusText = response.statusText || 'Unknown error';
+        if (response.status === 403) {
+          throw new Error('Access denied (403) - URL may have expired');
+        } else if (response.status === 404) {
+          throw new Error('File not found (404) - content may have been removed');
+        } else if (response.status === 429) {
+          throw new Error('Too many requests (429) - try again later');
+        } else if (response.status >= 500) {
+          throw new Error(`Server error (${response.status}) - try again later`);
+        }
+        throw new Error(`HTTP ${response.status}: ${statusText}`);
       }
 
       const contentLength = response.headers.get('content-length');
       const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
 
-      updateDownload(id, { size: totalSize });
+      updateDownload(id, { size: totalSize, retryCount: 0 }); // Reset retry count on successful connection
 
       if (!response.body) {
         throw new Error('Response body is not available');
@@ -276,14 +359,38 @@ export function useDownloadManager() {
 
       const chunks: BlobPart[] = [];
       let downloadedBytes = 0;
+      let consecutiveSlowReads = 0;
+      const SLOW_READ_THRESHOLD_MS = 5000; // Consider a read slow if it takes > 5s
 
       while (true) {
-        const { done, value } = await reader.read();
+        const readStartTime = Date.now();
+        let readResult: ReadableStreamReadResult<Uint8Array>;
+
+        try {
+          readResult = await reader.read();
+        } catch (readError) {
+          // Handle stream read errors (connection dropped, etc.)
+          throw new Error('Connection lost while downloading');
+        }
+
+        const { done, value } = readResult;
+        const readDuration = Date.now() - readStartTime;
 
         if (done) break;
 
         chunks.push(value as BlobPart);
         downloadedBytes += value.length;
+
+        // Track slow reads for adaptive behavior
+        if (readDuration > SLOW_READ_THRESHOLD_MS) {
+          consecutiveSlowReads++;
+          if (consecutiveSlowReads >= 3) {
+            // Connection is very slow, might be failing
+            console.warn('Download connection is very slow, may be unstable');
+          }
+        } else {
+          consecutiveSlowReads = 0;
+        }
 
         // Calculate speed
         const tracker = speedTrackersRef.current.get(id);
@@ -308,18 +415,14 @@ export function useDownloadManager() {
           }
         }
 
-        // Throttle download speed to respect server limits
-        // Always apply minimum delay between chunks to avoid overwhelming server
-        // Then add speed-based delay if speed limit is set
-        let chunkDelay = MIN_CHUNK_DELAY_MS;
-
+        // Throttle download speed if speed limit is set
+        // Only apply delay if we have a speed limit configured
         if (speedLimitRef.current > 0) {
           const targetBytesPerSecond = speedLimitRef.current * 1024;
           const speedBasedDelay = (value.length / targetBytesPerSecond) * 1000;
-          chunkDelay = Math.max(chunkDelay, speedBasedDelay);
+          const chunkDelay = Math.max(MIN_CHUNK_DELAY_MS, speedBasedDelay);
+          await new Promise(resolve => setTimeout(resolve, chunkDelay));
         }
-
-        await new Promise(resolve => setTimeout(resolve, chunkDelay));
       }
 
       // Combine chunks into blob
@@ -388,10 +491,49 @@ export function useDownloadManager() {
           }
           return prev;
         });
+      } else if (isRetryableError(error) && currentRetryCount < MAX_RETRIES) {
+        // Retry with exponential backoff
+        const retryDelay = RETRY_DELAY_MS * Math.pow(2, currentRetryCount);
+        const errorMsg = getErrorMessage(error);
+
+        updateDownload(id, {
+          error: `${errorMsg} - Retrying in ${retryDelay / 1000}s (attempt ${currentRetryCount + 1}/${MAX_RETRIES})`,
+          retryCount: currentRetryCount + 1,
+        });
+
+        // Schedule retry
+        setTimeout(() => {
+          // Check if download was cancelled while waiting for retry
+          setDownloads(prev => {
+            const download = prev.find(d => d.id === id);
+            if (download && download.status === 'downloading') {
+              // Still in downloading state, proceed with retry
+              if (startDownloadRef.current) {
+                startDownloadRef.current(id, url);
+              }
+            } else {
+              // Download was cancelled or status changed, don't retry
+              isProcessingRef.current = false;
+              if (scheduleNextRef.current) {
+                scheduleNextRef.current();
+              }
+            }
+            return prev;
+          });
+        }, retryDelay);
+
+        // Don't reset isProcessingRef - we're still working on this download
       } else {
+        // No more retries or non-retryable error
+        const errorMsg = getErrorMessage(error);
+        const finalError = currentRetryCount >= MAX_RETRIES
+          ? `${errorMsg} (failed after ${MAX_RETRIES} retries)`
+          : errorMsg;
+
         updateDownload(id, {
           status: 'failed',
-          error: error instanceof Error ? error.message : 'Download failed',
+          error: finalError,
+          speed: 0,
         });
         isProcessingRef.current = false;
         lastDownloadCompletedRef.current = Date.now();
@@ -424,6 +566,7 @@ export function useDownloadManager() {
           downloaded: 0,
           progress: 0,
           error: undefined,
+          retryCount: 0, // Reset retry count on manual resume
         } : d);
       }
       return prev;
@@ -462,6 +605,7 @@ export function useDownloadManager() {
           progress: 0,
           error: undefined,
           startedAt: Date.now(),
+          retryCount: 0, // Reset retry count on manual retry
         } : d);
       }
       return prev;
