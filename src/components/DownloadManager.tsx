@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { DownloadItem, DownloadStatus } from '../hooks/useDownloadManager';
 import { formatBytes, formatSpeed, estimateTimeRemaining } from '../hooks/useDownloadManager';
+import { useDownloadLogger } from '../hooks/useDownloadLogger';
 import './DownloadManager.css';
 
 interface DownloadManagerProps {
@@ -98,6 +99,9 @@ export function DownloadManager({
   onDelayMsChange,
 }: DownloadManagerProps) {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [showDebugLogs, setShowDebugLogs] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+  const { logs, clearLogs, copyLogsToClipboard } = useDownloadLogger();
 
   const filteredDownloads = downloads.filter(d => {
     if (filter === 'all') return true;
@@ -361,6 +365,62 @@ export function DownloadManager({
               </div>
             </div>
           ))
+        )}
+      </div>
+
+      {/* Debug Logs Panel */}
+      <div className="download-manager__debug">
+        <button
+          className={`download-manager__debug-toggle ${showDebugLogs ? 'active' : ''}`}
+          onClick={() => setShowDebugLogs(!showDebugLogs)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+          </svg>
+          Debug Logs ({logs.length})
+        </button>
+
+        {showDebugLogs && (
+          <div className="download-manager__debug-panel">
+            <div className="download-manager__debug-actions">
+              <button
+                onClick={async () => {
+                  await copyLogsToClipboard();
+                  setCopyFeedback(true);
+                  setTimeout(() => setCopyFeedback(false), 2000);
+                }}
+                title="Copy logs to clipboard"
+              >
+                {copyFeedback ? 'Copied!' : 'Copy Logs'}
+              </button>
+              <button onClick={clearLogs} title="Clear all logs">
+                Clear
+              </button>
+            </div>
+            <div className="download-manager__debug-logs">
+              {logs.length === 0 ? (
+                <div className="download-manager__debug-empty">No logs yet</div>
+              ) : (
+                logs.map(log => (
+                  <div key={log.id} className={`download-manager__debug-log download-manager__debug-log--${log.level}`}>
+                    <span className="download-manager__debug-time">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                    <span className={`download-manager__debug-level download-manager__debug-level--${log.level}`}>
+                      {log.level.toUpperCase()}
+                    </span>
+                    <span className="download-manager__debug-msg">{log.message}</span>
+                    {log.data && (
+                      <details className="download-manager__debug-data">
+                        <summary>Data</summary>
+                        <pre>{JSON.stringify(log.data, null, 2)}</pre>
+                      </details>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
 

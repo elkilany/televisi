@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { downloadLogger } from '../utils/downloadLogger';
 
 export type DownloadStatus = 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
@@ -257,6 +258,21 @@ export function useDownloadManager() {
   const startDownload = useCallback(async (id: string, url: string) => {
     const abortController = new AbortController();
 
+    // Get download name for logging
+    let downloadName = 'Unknown';
+    setDownloads(prev => {
+      const download = prev.find(d => d.id === id);
+      if (download) {
+        downloadName = download.name;
+      }
+      return prev;
+    });
+
+    downloadLogger.info(`Starting download: ${downloadName}`, {
+      url: url.substring(0, 100) + (url.length > 100 ? '...' : ''),
+      downloadName,
+    });
+
     // Helper to get a user-friendly error message
     const getErrorMessage = (error: unknown): string => {
       if (error instanceof TypeError) {
@@ -319,23 +335,40 @@ export function useDownloadManager() {
 
       let response: Response;
       try {
+        downloadLogger.debug(`Connecting to server...`, { downloadName });
         response = await fetch(url, {
           signal: abortController.signal,
         });
         clearTimeout(timeoutId);
+        downloadLogger.info(`Server responded: HTTP ${response.status}`, {
+          downloadName,
+          status: response.status,
+          statusText: response.statusText,
+          headers: {
+            contentLength: response.headers.get('content-length'),
+            contentType: response.headers.get('content-type'),
+          },
+        });
       } catch (fetchError) {
         clearTimeout(timeoutId);
         // Check if it was a timeout
         if (abortController.signal.aborted) {
+          downloadLogger.error(`Connection timed out after ${FETCH_TIMEOUT_MS / 1000}s`, { downloadName });
           const timeoutError = new Error('Connection timed out - server not responding');
           timeoutError.name = 'TimeoutError';
           throw timeoutError;
         }
+        downloadLogger.error(`Fetch error: ${fetchError instanceof Error ? fetchError.message : 'Unknown'}`, {
+          downloadName,
+          error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+          errorType: fetchError instanceof Error ? fetchError.constructor.name : typeof fetchError,
+        });
         throw fetchError;
       }
 
       if (!response.ok) {
         const statusText = response.statusText || 'Unknown error';
+        downloadLogger.error(`HTTP error: ${response.status} ${statusText}`, { downloadName, status: response.status });
         if (response.status === 403) {
           throw new Error('Access denied (403) - URL may have expired');
         } else if (response.status === 404) {
@@ -351,6 +384,12 @@ export function useDownloadManager() {
       const contentLength = response.headers.get('content-length');
       const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
 
+      downloadLogger.info(`Download started: ${downloadLogger.formatBytes(totalSize)}`, {
+        downloadName,
+        totalSize,
+        totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2),
+      });
+
       updateDownload(id, { size: totalSize, retryCount: 0 }); // Reset retry count on successful connection
 
       if (!response.body) {
@@ -364,6 +403,9 @@ export function useDownloadManager() {
       const chunks: BlobPart[] = [];
       let downloadedBytes = 0;
       let consecutiveSlowReads = 0;
+      let lastProgressLog = 0; // Track last logged progress percentage
+      let chunkCount = 0;
+      const startTime = Date.now();
       const SLOW_READ_THRESHOLD_MS = 5000; // Consider a read slow if it takes > 5s
       const READ_TIMEOUT_MS = 60000; // 60 second timeout for each read operation
 
@@ -395,11 +437,31 @@ export function useDownloadManager() {
         } catch (readError) {
           // Handle stream read errors (connection dropped, stalled, etc.)
           const progress = formatProgress(downloadedBytes, totalSize);
+          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
           if (readError instanceof Error && readError.message.includes('Read timeout')) {
-            console.error(`Download stalled at ${progress}`);
+            downloadLogger.error(`Read timeout - connection stalled`, {
+              downloadName,
+              progress,
+              downloadedBytes,
+              totalSize,
+              chunkCount,
+              elapsedSeconds: elapsedSec,
+              lastChunkSize: chunks.length > 0 ? 'unknown' : 0,
+            });
             throw readError;
           }
-          console.error(`Connection lost at ${progress}:`, readError);
+
+          downloadLogger.error(`Connection lost during download`, {
+            downloadName,
+            progress,
+            downloadedBytes,
+            totalSize,
+            chunkCount,
+            elapsedSeconds: elapsedSec,
+            error: readError instanceof Error ? readError.message : String(readError),
+            errorType: readError instanceof Error ? readError.constructor.name : typeof readError,
+          });
           throw new Error(`Connection lost while downloading (at ${progress})`);
         }
 
@@ -410,13 +472,37 @@ export function useDownloadManager() {
 
         chunks.push(value as BlobPart);
         downloadedBytes += value.length;
+        chunkCount++;
+
+        // Log progress every 10%
+        if (totalSize > 0) {
+          const currentProgress = Math.floor((downloadedBytes / totalSize) * 100);
+          if (currentProgress >= lastProgressLog + 10) {
+            const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+            const speedMBps = (downloadedBytes / (Date.now() - startTime) * 1000 / (1024 * 1024)).toFixed(2);
+            downloadLogger.debug(`Progress: ${currentProgress}%`, {
+              downloadName,
+              progress: `${currentProgress}%`,
+              downloaded: downloadLogger.formatBytes(downloadedBytes),
+              total: downloadLogger.formatBytes(totalSize),
+              chunkCount,
+              elapsedSeconds: elapsedSec,
+              averageSpeedMBps: speedMBps,
+            });
+            lastProgressLog = currentProgress;
+          }
+        }
 
         // Track slow reads for adaptive behavior
         if (readDuration > SLOW_READ_THRESHOLD_MS) {
           consecutiveSlowReads++;
           if (consecutiveSlowReads >= 3) {
             // Connection is very slow, might be failing
-            console.warn(`Download connection slow at ${formatProgress(downloadedBytes, totalSize)}`);
+            downloadLogger.warn(`Connection slow - ${consecutiveSlowReads} slow reads`, {
+              downloadName,
+              progress: formatProgress(downloadedBytes, totalSize),
+              readDurationMs: readDuration,
+            });
           }
         } else {
           consecutiveSlowReads = 0;
@@ -470,6 +556,17 @@ export function useDownloadManager() {
           });
         }
         return prev;
+      });
+
+      const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      const avgSpeed = (downloadedBytes / (Date.now() - startTime) * 1000 / (1024 * 1024)).toFixed(2);
+
+      downloadLogger.info(`Download completed: ${downloadName}`, {
+        downloadName,
+        totalSize: downloadLogger.formatBytes(downloadedBytes),
+        totalChunks: chunkCount,
+        totalTimeSeconds: totalTime,
+        averageSpeedMBps: avgSpeed,
       });
 
       updateDownload(id, {
@@ -526,6 +623,14 @@ export function useDownloadManager() {
         const retryDelay = RETRY_DELAY_MS * Math.pow(2, currentRetryCount);
         const errorMsg = getErrorMessage(error);
 
+        downloadLogger.warn(`Retrying download (attempt ${currentRetryCount + 1}/${MAX_RETRIES})`, {
+          downloadName,
+          error: errorMsg,
+          retryDelaySeconds: retryDelay / 1000,
+          attempt: currentRetryCount + 1,
+          maxRetries: MAX_RETRIES,
+        });
+
         updateDownload(id, {
           error: `${errorMsg} - Retrying in ${retryDelay / 1000}s (attempt ${currentRetryCount + 1}/${MAX_RETRIES})`,
           retryCount: currentRetryCount + 1,
@@ -538,11 +643,13 @@ export function useDownloadManager() {
             const download = prev.find(d => d.id === id);
             if (download && download.status === 'downloading') {
               // Still in downloading state, proceed with retry
+              downloadLogger.info(`Retrying now...`, { downloadName, attempt: currentRetryCount + 1 });
               if (startDownloadRef.current) {
                 startDownloadRef.current(id, url);
               }
             } else {
               // Download was cancelled or status changed, don't retry
+              downloadLogger.info(`Retry cancelled - download status changed`, { downloadName });
               isProcessingRef.current = false;
               if (scheduleNextRef.current) {
                 scheduleNextRef.current();
@@ -559,6 +666,15 @@ export function useDownloadManager() {
         const finalError = currentRetryCount >= MAX_RETRIES
           ? `${errorMsg} (failed after ${MAX_RETRIES} retries)`
           : errorMsg;
+
+        downloadLogger.error(`Download failed permanently: ${downloadName}`, {
+          downloadName,
+          error: finalError,
+          retryCount: currentRetryCount,
+          maxRetries: MAX_RETRIES,
+          wasRetryable: isRetryableError(error),
+          originalError: error instanceof Error ? error.message : String(error),
+        });
 
         updateDownload(id, {
           status: 'failed',

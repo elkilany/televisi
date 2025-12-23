@@ -455,6 +455,185 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Debug Panel */
+.download-manager__debug {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 1.25rem;
+}
+
+.download-manager__debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.download-manager__debug-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f5f9;
+}
+
+.download-manager__debug-toggle.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
+.download-manager__debug-toggle svg {
+  flex-shrink: 0;
+}
+
+.download-manager__debug-panel {
+  margin-top: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.download-manager__debug-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.download-manager__debug-actions button {
+  padding: 0.375rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.download-manager__debug-actions button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+}
+
+.download-manager__debug-logs {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.7rem;
+}
+
+.download-manager__debug-empty {
+  text-align: center;
+  padding: 1rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+.download-manager__debug-log {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  line-height: 1.4;
+}
+
+.download-manager__debug-log:last-child {
+  border-bottom: none;
+}
+
+.download-manager__debug-time {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.download-manager__debug-level {
+  padding: 0 0.375rem;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+
+.download-manager__debug-level--info {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.download-manager__debug-level--warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.download-manager__debug-level--error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.download-manager__debug-level--debug {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9ca3af;
+}
+
+.download-manager__debug-msg {
+  color: #e2e8f0;
+  flex: 1;
+  word-break: break-word;
+}
+
+.download-manager__debug-log--error .download-manager__debug-msg {
+  color: #fca5a5;
+}
+
+.download-manager__debug-log--warn .download-manager__debug-msg {
+  color: #fcd34d;
+}
+
+.download-manager__debug-data {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.download-manager__debug-data summary {
+  cursor: pointer;
+  color: #6366f1;
+  font-size: 0.65rem;
+}
+
+.download-manager__debug-data pre {
+  margin: 0.25rem 0 0 0;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  color: #a5b4fc;
+  font-size: 0.65rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.download-manager__debug-logs::-webkit-scrollbar {
+  width: 4px;
+}
+
+.download-manager__debug-logs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.download-manager__debug-logs::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
 /* Responsive */
 @media (max-width: 480px) {
   .download-manager {
