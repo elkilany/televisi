@@ -262,15 +262,17 @@ export function useDownloadManager() {
 
   const startDownload = useCallback(async (id: string, url: string) => {
     // CRITICAL: Prevent multiple simultaneous downloads
-    if (activeDownloadIdRef.current !== null && activeDownloadIdRef.current !== id) {
-      downloadLogger.warn(`Blocked duplicate download attempt - another download is active`, {
+    // Block if ANY download is active (even same ID - prevents React double-calls)
+    if (activeDownloadIdRef.current !== null) {
+      downloadLogger.warn(`Blocked duplicate download attempt`, {
         blockedId: id,
         activeId: activeDownloadIdRef.current,
+        sameId: activeDownloadIdRef.current === id,
       });
       return;
     }
 
-    // Set this as the active download
+    // Set this as the active download IMMEDIATELY before any async work
     activeDownloadIdRef.current = id;
 
     const abortController = new AbortController();
