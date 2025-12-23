@@ -114,6 +114,7 @@ export function useDownloadManager() {
   const controllersRef = useRef<Map<string, DownloadController>>(new Map());
   const speedTrackersRef = useRef<Map<string, { lastBytes: number; lastTime: number }>>(new Map());
   const isProcessingRef = useRef(false);
+  const activeDownloadIdRef = useRef<string | null>(null); // Track which download is currently active
   const lastDownloadCompletedRef = useRef<number>(0); // Track when the last download completed
   const scheduleNextRef = useRef<(() => void) | null>(null); // Ref to hold schedule function
   const startDownloadRef = useRef<((id: string, url: string) => void) | null>(null); // Ref to hold startDownload
@@ -233,7 +234,11 @@ export function useDownloadManager() {
 
   // Start processing the queue - call this to begin downloads
   const startQueue = useCallback(() => {
-    if (isProcessingRef.current) return; // Already processing
+    // Don't start if already processing or if another download is active
+    if (isProcessingRef.current || activeDownloadIdRef.current !== null) {
+      downloadLogger.debug('Queue start blocked - download already in progress');
+      return;
+    }
 
     setDownloads(prev => {
       const nextPending = prev.find(d => d.status === 'pending');
@@ -256,17 +261,27 @@ export function useDownloadManager() {
   }, []);
 
   const startDownload = useCallback(async (id: string, url: string) => {
+    // CRITICAL: Prevent multiple simultaneous downloads
+    if (activeDownloadIdRef.current !== null && activeDownloadIdRef.current !== id) {
+      downloadLogger.warn(`Blocked duplicate download attempt - another download is active`, {
+        blockedId: id,
+        activeId: activeDownloadIdRef.current,
+      });
+      return;
+    }
+
+    // Set this as the active download
+    activeDownloadIdRef.current = id;
+
     const abortController = new AbortController();
 
-    // Get download name for logging
+    // Get download name synchronously from current state
     let downloadName = 'Unknown';
-    setDownloads(prev => {
-      const download = prev.find(d => d.id === id);
-      if (download) {
-        downloadName = download.name;
-      }
-      return prev;
-    });
+    const currentDownloads = downloads;
+    const currentDownload = currentDownloads.find(d => d.id === id);
+    if (currentDownload) {
+      downloadName = currentDownload.name;
+    }
 
     downloadLogger.info(`Starting download: ${downloadName}`, {
       url: url.substring(0, 100) + (url.length > 100 ? '...' : ''),
@@ -581,6 +596,7 @@ export function useDownloadManager() {
 
       controllersRef.current.delete(id);
       speedTrackersRef.current.delete(id);
+      activeDownloadIdRef.current = null; // Clear active download
       isProcessingRef.current = false;
       lastDownloadCompletedRef.current = Date.now();
 
@@ -601,10 +617,13 @@ export function useDownloadManager() {
           // If paused, keep processing ref true so next download waits
           if (download?.status === 'paused') {
             // Don't reset isProcessingRef - user paused, so wait
+            // But clear active download so pause works
+            activeDownloadIdRef.current = null;
             return prev;
           }
 
           // If cancelled or unknown, reset processing ref and allow next
+          activeDownloadIdRef.current = null;
           isProcessingRef.current = false;
           lastDownloadCompletedRef.current = Date.now();
 
@@ -681,6 +700,7 @@ export function useDownloadManager() {
           error: finalError,
           speed: 0,
         });
+        activeDownloadIdRef.current = null; // Clear active download
         isProcessingRef.current = false;
         lastDownloadCompletedRef.current = Date.now();
 
@@ -690,7 +710,7 @@ export function useDownloadManager() {
         }
       }
     }
-  }, [updateDownload, downloadFolder, autoSave, saveToFolder]);
+  }, [updateDownload, downloadFolder, autoSave, saveToFolder, downloads]);
 
   const pauseDownload = useCallback((id: string) => {
     const controller = controllersRef.current.get(id);
@@ -793,12 +813,19 @@ export function useDownloadManager() {
     });
     controllersRef.current.clear();
     speedTrackersRef.current.clear();
+    activeDownloadIdRef.current = null;
     isProcessingRef.current = false;
     setDownloads([]);
   }, []);
 
   // Process next download in queue - called only after a download completes
   const processNextInQueue = useCallback(() => {
+    // Don't process next if another download is still active
+    if (activeDownloadIdRef.current !== null) {
+      downloadLogger.debug('Queue processing blocked - download still active');
+      return;
+    }
+
     setDownloads(prev => {
       const nextPending = prev.find(d => d.status === 'pending');
       if (!nextPending) {
